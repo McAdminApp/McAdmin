@@ -43,16 +43,20 @@ public sealed partial class ServerLogReader(ILogger<ServerLogReader> logger)
             return [];
         }
 
-        var text = ReadSlice(path, fromEnd: true);
-        if (text is null)
+        var slice = ReadSlice(path, fromEnd: true);
+        if (slice is null)
         {
             return [];
         }
 
-        var raw = text.Split('\n');
+        var (text, startedMidFile) = slice.Value;
 
-        // The first line is almost certainly cut in half by where the read started.
-        var usable = raw.Skip(1).Select(line => line.TrimEnd('\r')).Where(line => line.Length > 0).ToList();
+        // Only a read that began mid-file cuts a line in half; a whole file starts clean.
+        var usable = text.Split('\n')
+            .Skip(startedMidFile ? 1 : 0)
+            .Select(line => line.TrimEnd('\r'))
+            .Where(line => line.Length > 0)
+            .ToList();
         if (usable.Count > lines)
         {
             usable = usable.Skip(usable.Count - lines).ToList();
@@ -69,11 +73,13 @@ public sealed partial class ServerLogReader(ILogger<ServerLogReader> logger)
             return null;
         }
 
-        var text = ReadSlice(path, fromEnd: false);
-        if (text is null)
+        var slice = ReadSlice(path, fromEnd: false);
+        if (slice is null)
         {
             return null;
         }
+
+        var text = slice.Value.Text;
 
         var vanilla = VanillaVersion.Match(text);
         if (vanilla.Success)
@@ -86,7 +92,8 @@ public sealed partial class ServerLogReader(ILogger<ServerLogReader> logger)
         return software.Success ? software.Groups["version"].Value.Trim() : null;
     }
 
-    private string? ReadSlice(string path, bool fromEnd)
+    /// <summary>Reads one end of the file, and reports whether it had to start mid-file to do it.</summary>
+    private (string Text, bool StartedMidFile)? ReadSlice(string path, bool fromEnd)
     {
         try
         {
@@ -96,8 +103,9 @@ public sealed partial class ServerLogReader(ILogger<ServerLogReader> logger)
 
             var window = fromEnd ? TailBytes : HeadBytes;
             var length = (int)Math.Min(file.Length, window);
+            var startedMidFile = fromEnd && file.Length > window;
 
-            if (fromEnd && file.Length > window)
+            if (startedMidFile)
             {
                 file.Seek(-window, SeekOrigin.End);
             }
@@ -107,7 +115,7 @@ public sealed partial class ServerLogReader(ILogger<ServerLogReader> logger)
 
             lastFailure = null;
 
-            return Encoding.UTF8.GetString(buffer);
+            return (Encoding.UTF8.GetString(buffer), startedMidFile);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
         {
@@ -170,6 +178,16 @@ public sealed partial class ServerLogReader(ILogger<ServerLogReader> logger)
                 TimeSpan.TryParse(match.Groups["time"].Value, out var time) ? time : null,
                 LevelOf(string.IsNullOrEmpty(tags) ? inline : tags, message),
                 message));
+        }
+
+        // Stack traces and other wrapped output carry no timestamp of their own; they
+        // continue the line above, so fill forwards before anything gets dated.
+        for (var i = 1; i < parsed.Count; i++)
+        {
+            if (parsed[i].Time is null)
+            {
+                parsed[i] = parsed[i] with { Time = parsed[i - 1].Time };
+            }
         }
 
         var result = new ConsoleLine[parsed.Count];

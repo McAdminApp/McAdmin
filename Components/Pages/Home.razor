@@ -2,7 +2,10 @@
 @attribute [Authorize]
 @rendermode InteractiveServer
 
+@implements IAsyncDisposable
+
 @inject IMinecraftServerController Server
+@inject IJSRuntime JS
 
 <PageTitle>Console — McAdmin</PageTitle>
 
@@ -27,10 +30,10 @@
             </div>
         }
 
-        @if (actionError is not null)
+        @if (Problem is not null)
         {
             <div class="notice notice--error" role="alert">
-                <span>@actionError</span>
+                <span>@Problem</span>
             </div>
         }
 
@@ -134,8 +137,8 @@
                         <button class="btn btn--link btn--small" @onclick="RefreshAsync" disabled="@busy">Refresh</button>
                     </div>
 
-                    <div class="console slot--sunken">
-                        @foreach (var line in log)
+                    <div class="console slot--sunken" @ref="logPanel">
+                        @foreach (var line in ConsoleLines)
                         {
                             <div class="console-line" data-level="@line.Level">
                                 <span class="console-time">@line.Timestamp.ToString("HH:mm:ss")</span>
@@ -159,20 +162,109 @@
 </div>
 
 @code {
+    /// <summary>How often the page re-reads the server state on its own.</summary>
+    private static readonly TimeSpan RefreshInterval = TimeSpan.FromSeconds(1);
+
+    /// <summary>How much command output to keep below the log before the oldest is dropped.</summary>
+    private const int MaxEchoLines = 200;
+
     private ServerSnapshot? snapshot;
     private IReadOnlyList<OnlinePlayer> players = [];
     private IReadOnlyList<ConsoleLine> log = [];
+
+    /// <summary>
+    /// What the commands typed here produced. RCON answers the caller and writes nothing to
+    /// the server's own log, so these lines exist only in this page — the log panel would
+    /// otherwise stay silent no matter what was run.
+    /// </summary>
+    private readonly List<ConsoleLine> echo = [];
+
     private string command = string.Empty;
     private string? actionError;
+    private string? pollError;
     private bool busy;
 
+    private ElementReference logPanel;
+    private IJSObjectReference? scroller;
+    private CancellationTokenSource? polling;
+    private int scrolledAt = -1;
+
+    private IEnumerable<ConsoleLine> ConsoleLines => log.Concat(echo);
+
+    private string? Problem => actionError ?? pollError;
+
+    // Only the first read happens here. The page is prerendered before it becomes
+    // interactive, so this runs twice — once on an instance that is then thrown away — and
+    // starting the timer here would leave that copy polling forever. It starts on first
+    // render instead, which only the interactive instance reaches.
     protected override Task OnInitializedAsync() => RefreshAsync();
+
+    /// <summary>Keeps every value on the page current without the user pressing anything.</summary>
+    private async Task PollAsync(CancellationToken ct)
+    {
+        using var timer = new PeriodicTimer(RefreshInterval);
+
+        try
+        {
+            while (await timer.WaitForNextTickAsync(ct))
+            {
+                // On the circuit's own context, so rendering stays on the thread Blazor expects.
+                // A slow read delays the next tick rather than overlapping with it.
+                await InvokeAsync(async () =>
+                {
+                    await RefreshAsync();
+                    StateHasChanged();
+                });
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // The page was closed.
+        }
+    }
 
     private async Task RefreshAsync()
     {
-        snapshot = await Server.GetSnapshotAsync();
-        players = await Server.GetPlayersAsync();
-        log = await Server.GetRecentLogAsync();
+        try
+        {
+            snapshot = await Server.GetSnapshotAsync();
+            players = await Server.GetPlayersAsync();
+            log = await Server.GetRecentLogAsync();
+            pollError = null;
+        }
+        catch (Exception ex)
+        {
+            // A stopped server is not an error — the controller reports that as state. This
+            // is for the things that are, like a rejected RCON password.
+            pollError = ex.Message;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            // Imported rather than pulled in with a script tag: a tag rendered by a
+            // component only runs when the page was loaded outright, not when Blazor
+            // navigated here and patched it into the DOM.
+            // "./" matters: Assets gives a path relative to the base href, and import()
+            // treats one without it as a bare module name and refuses to resolve it.
+            scroller = await JS.InvokeAsync<IJSObjectReference>(
+                "import", $"./{Assets["Components/Pages/Home.razor.js"]}");
+
+            polling = new CancellationTokenSource();
+            _ = PollAsync(polling.Token);
+        }
+
+        var lines = log.Count + echo.Count;
+
+        if (scroller is null || lines == scrolledAt)
+        {
+            return;
+        }
+
+        await scroller.InvokeVoidAsync("scrollToBottom", logPanel);
+        scrolledAt = lines;
     }
 
     private Task StartAsync() => RunAsync(Server.StartAsync);
@@ -183,9 +275,77 @@
 
     private async Task SendCommandAsync()
     {
-        var toRun = command;
-        await RunAsync(async ct => await Server.SendCommandAsync(toRun, ct));
+        var toRun = command.Trim();
+
+        if (toRun.Length == 0)
+        {
+            return;
+        }
+
         command = string.Empty;
+        busy = true;
+        actionError = null;
+
+        Write("command", $"> {toRun}");
+
+        try
+        {
+            var response = await Server.SendCommandAsync(toRun, CancellationToken.None);
+
+            if (string.IsNullOrWhiteSpace(response))
+            {
+                Write("muted", "(the server answered with nothing)");
+            }
+            else
+            {
+                foreach (var line in response.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    Write("info", line.TrimEnd('\r'));
+                }
+            }
+
+            await RefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            actionError = ex.Message;
+            Write("error", ex.Message);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private void Write(string level, string text)
+    {
+        echo.Add(new ConsoleLine(DateTimeOffset.Now, level, text));
+
+        if (echo.Count > MaxEchoLines)
+        {
+            echo.RemoveRange(0, echo.Count - MaxEchoLines);
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (polling is not null)
+        {
+            await polling.CancelAsync();
+            polling.Dispose();
+        }
+
+        if (scroller is not null)
+        {
+            try
+            {
+                await scroller.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+                // The browser is already gone, so there is nothing left to release.
+            }
+        }
     }
 
     /// <summary>Runs one server action, keeps the buttons quiet while it works, and re-reads the state after.</summary>

@@ -36,7 +36,12 @@ public sealed class DockerContainers(string socketPath) : IDisposable
         };
 
         // The host name is ignored — every request goes down the socket — but HttpClient wants one.
-        return new HttpClient(handler) { BaseAddress = new Uri("http://docker") };
+        // Stopping blocks until the server is down, which can outlast the 100 second default.
+        return new HttpClient(handler)
+        {
+            BaseAddress = new Uri("http://docker"),
+            Timeout = TimeSpan.FromMinutes(10)
+        };
     }
 
     public async Task<ContainerState> InspectAsync(string name, CancellationToken ct = default)

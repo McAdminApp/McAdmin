@@ -823,6 +823,10 @@ select {
 .console-line[data-level="error"] .console-text { color: var(--redstone); }
 .console-line[data-level="join"] .console-text { color: var(--emerald); }
 
+/* Typed into the command bar, and what came back. Neither is in the server's own log. */
+.console-line[data-level="command"] .console-text { color: var(--bone); font-weight: 600; }
+.console-line[data-level="muted"] .console-text { color: var(--ash-dim); font-style: italic; }
+
 .command-bar {
     display: flex;
     gap: 0.6rem;

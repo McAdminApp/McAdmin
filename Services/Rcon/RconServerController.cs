@@ -19,8 +19,11 @@ public sealed partial class RconServerController : IMinecraftServerController, I
     [GeneratedRegex("§[0-9a-fk-orA-FK-OR]")]
     private static partial Regex ColourCodes { get; }
 
-    /// <summary>The page asks for the snapshot and the player list back to back; one "list" covers both.</summary>
-    private static readonly TimeSpan ListCacheWindow = TimeSpan.FromSeconds(2);
+    /// <summary>
+    /// The page asks for the snapshot and the player list back to back; one "list" covers
+    /// both. Kept under the page's one second refresh so every tick still sees fresh counts.
+    /// </summary>
+    private static readonly TimeSpan ListCacheWindow = TimeSpan.FromMilliseconds(750);
 
     private readonly RconOptions options;
     private readonly IServerSettingsStore settings;
@@ -153,12 +156,20 @@ public sealed partial class RconServerController : IMinecraftServerController, I
 
         try
         {
-            var stopped = await TryRconStopAsync(ct);
+            var stoppedOverRcon = await TryRconStopAsync(ct);
 
-            if (!stopped)
+            if (docker is not null)
             {
-                var containers = RequireContainerControl("stop");
-                await containers.StopAsync(options.ContainerName, options.StopTimeoutSeconds, ct);
+                // RCON alone is not enough. A container that exits on its own is brought
+                // straight back by restart: always and restart: unless-stopped, so a clean
+                // shutdown would look like it worked and then undo itself. Telling Docker to
+                // stop it marks it as deliberately stopped, which the policy honours. It is a
+                // no-op when the container has already exited.
+                await docker.StopAsync(options.ContainerName, options.StopTimeoutSeconds, ct);
+            }
+            else if (!stoppedOverRcon)
+            {
+                RequireContainerControl("stop");
             }
 
             await WaitForExitAsync(ct);
@@ -267,7 +278,7 @@ public sealed partial class RconServerController : IMinecraftServerController, I
 
         if (!container.Running)
         {
-            return container.ExitCode == 0 ? ServerState.Stopped : ServerState.Faulted;
+            return IsCleanExit(container.ExitCode) ? ServerState.Stopped : ServerState.Faulted;
         }
 
         if (stopping)
@@ -278,6 +289,13 @@ public sealed partial class RconServerController : IMinecraftServerController, I
         // The container is up well before the server finishes loading and opens RCON.
         return rconAnswering ? ServerState.Running : ServerState.Starting;
     }
+
+    /// <summary>
+    /// Whether an exit code means "someone asked it to stop" rather than "it fell over".
+    /// A server told to stop through Docker exits on a signal — 143 for SIGTERM, 137 when
+    /// the grace period ran out and it was killed — and neither is a fault to report.
+    /// </summary>
+    private static bool IsCleanExit(int exitCode) => exitCode is 0 or 130 or 137 or 143;
 
     private string? DetailFor(ServerState state, ContainerState? container) => state switch
     {
