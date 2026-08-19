@@ -1,0 +1,233 @@
+@page "/"
+@attribute [Authorize]
+@rendermode InteractiveServer
+
+@inject IMinecraftServerController Server
+
+<PageTitle>Console — McServerMgmnt</PageTitle>
+
+<div class="page-head">
+    <span class="eyebrow">Console</span>
+    <h1>@(snapshot?.Name ?? "Loading the server")</h1>
+    <p>Start and stop the server, watch what it is saying, and see who is playing.</p>
+</div>
+
+<div class="page-body">
+    <div class="stack">
+
+        @if (!Server.IsConnected)
+        {
+            <div class="notice notice--warn">
+                <span>
+                    <strong>Nothing is wired up yet.</strong> The numbers below are placeholders.
+                    Implement <span class="mono">IMinecraftServerController</span> in
+                    <span class="mono">Services/MinecraftServer.cs</span> and register it in
+                    <span class="mono">Program.cs</span> — this page reads everything through that interface.
+                </span>
+            </div>
+        }
+
+        @if (actionError is not null)
+        {
+            <div class="notice notice--error" role="alert">
+                <span>@actionError</span>
+            </div>
+        }
+
+        @if (snapshot is null)
+        {
+            <div class="slot">
+                <div class="empty">Reading the server state…</div>
+            </div>
+        }
+        else
+        {
+            <section class="slot">
+                <div class="slot-body" style="display: flex; align-items: center; gap: 1.75rem; flex-wrap: wrap;">
+                    <StatusBlock State="@BlockState" Label="@StateLabel"/>
+
+                    <div style="flex: 1 1 14rem; min-width: 0;">
+                        <span class="eyebrow">Status</span>
+                        <h2 style="font-size: 1.5rem; margin: 0.15rem 0 0.3rem;">@StateLabel</h2>
+                        <p class="muted" style="margin: 0;">
+                            @(snapshot.StatusDetail ?? $"Listening on {snapshot.Address}")
+                        </p>
+                    </div>
+
+                    <div style="display: flex; gap: 0.6rem; flex-wrap: wrap;">
+                        <button class="btn btn--primary" disabled="@(busy || snapshot.State is ServerState.Running or ServerState.Starting)"
+                                @onclick="StartAsync">
+                            Start server
+                        </button>
+                        <button class="btn" disabled="@(busy || snapshot.State is not ServerState.Running)"
+                                @onclick="RestartAsync">
+                            Restart
+                        </button>
+                        <button class="btn btn--danger" disabled="@(busy || snapshot.State is ServerState.Stopped or ServerState.Stopping)"
+                                @onclick="StopAsync">
+                            Stop server
+                        </button>
+                    </div>
+                </div>
+
+                <dl class="readout" style="border-top: 1px solid var(--edge-line); box-shadow: 0 -1px 0 var(--edge-lit);">
+                    <div class="readout-cell">
+                        <dt>Players</dt>
+                        <dd>@snapshot.PlayersOnline<small>/ @snapshot.PlayerSlots</small></dd>
+                    </div>
+                    <div class="readout-cell">
+                        <dt>Uptime</dt>
+                        <dd>@FormatUptime(snapshot.Uptime)</dd>
+                    </div>
+                    <div class="readout-cell">
+                        <dt>Version</dt>
+                        <dd style="font-size: 1.05rem;">@snapshot.Version</dd>
+                    </div>
+                    <div class="readout-cell">
+                        <dt>Address</dt>
+                        <dd style="font-size: 1.05rem;" class="mono">@snapshot.Address</dd>
+                    </div>
+                </dl>
+            </section>
+
+            <div class="grid-2">
+                <section class="slot">
+                    <div class="slot-head">
+                        <h2>Players</h2>
+                        <span class="eyebrow">@players.Count online</span>
+                    </div>
+
+                    @if (players.Count == 0)
+                    {
+                        <div class="empty">
+                            <h3>Nobody is online</h3>
+                            <p class="muted" style="margin: 0;">Start the server to let players in.</p>
+                        </div>
+                    }
+                    else
+                    {
+                        <table class="table">
+                            <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Session</th>
+                                <th>Ping</th>
+                            </tr>
+                            </thead>
+                            <tbody>
+                            @foreach (var player in players)
+                            {
+                                <tr>
+                                    <td><strong>@player.Name</strong></td>
+                                    <td class="mono">@FormatUptime(player.SessionLength)</td>
+                                    <td class="mono">@player.Ping ms</td>
+                                </tr>
+                            }
+                            </tbody>
+                        </table>
+                    }
+                </section>
+
+                <section class="slot">
+                    <div class="slot-head">
+                        <h2>Server log</h2>
+                        <button class="btn btn--link btn--small" @onclick="RefreshAsync" disabled="@busy">Refresh</button>
+                    </div>
+
+                    <div class="console slot--sunken">
+                        @foreach (var line in log)
+                        {
+                            <div class="console-line" data-level="@line.Level">
+                                <span class="console-time">@line.Timestamp.ToString("HH:mm:ss")</span>
+                                <span class="console-text">@line.Text</span>
+                            </div>
+                        }
+                    </div>
+
+                    <div class="command-bar">
+                        <input type="text" placeholder="say hello" @bind="command" @bind:event="oninput"
+                               disabled="@(!Server.IsConnected)" aria-label="Server command"/>
+                        <button class="btn" @onclick="SendCommandAsync"
+                                disabled="@(busy || !Server.IsConnected || string.IsNullOrWhiteSpace(command))">
+                            Run
+                        </button>
+                    </div>
+                </section>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private ServerSnapshot? snapshot;
+    private IReadOnlyList<OnlinePlayer> players = [];
+    private IReadOnlyList<ConsoleLine> log = [];
+    private string command = string.Empty;
+    private string? actionError;
+    private bool busy;
+
+    protected override Task OnInitializedAsync() => RefreshAsync();
+
+    private async Task RefreshAsync()
+    {
+        snapshot = await Server.GetSnapshotAsync();
+        players = await Server.GetPlayersAsync();
+        log = await Server.GetRecentLogAsync();
+    }
+
+    private Task StartAsync() => RunAsync(Server.StartAsync);
+
+    private Task StopAsync() => RunAsync(Server.StopAsync);
+
+    private Task RestartAsync() => RunAsync(Server.RestartAsync);
+
+    private async Task SendCommandAsync()
+    {
+        var toRun = command;
+        await RunAsync(async ct => await Server.SendCommandAsync(toRun, ct));
+        command = string.Empty;
+    }
+
+    /// <summary>Runs one server action, keeps the buttons quiet while it works, and re-reads the state after.</summary>
+    private async Task RunAsync(Func<CancellationToken, Task> action)
+    {
+        busy = true;
+        actionError = null;
+
+        try
+        {
+            await action(CancellationToken.None);
+            await RefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            actionError = ex.Message;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private string BlockState => snapshot?.State switch
+    {
+        ServerState.Running => "running",
+        ServerState.Starting or ServerState.Stopping => "pending",
+        ServerState.Faulted => "error",
+        _ => "stopped"
+    };
+
+    private string StateLabel => snapshot?.State switch
+    {
+        ServerState.Running => "Running",
+        ServerState.Starting => "Starting up",
+        ServerState.Stopping => "Shutting down",
+        ServerState.Faulted => "Stopped after an error",
+        _ => "Stopped"
+    };
+
+    private static string FormatUptime(TimeSpan span) =>
+        span.TotalSeconds < 1 ? "—"
+        : span.TotalHours >= 1 ? $"{(int)span.TotalHours}h {span.Minutes:00}m"
+        : $"{span.Minutes}m {span.Seconds:00}s";
+}

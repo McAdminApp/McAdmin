@@ -1,0 +1,147 @@
+@page "/account"
+@attribute [Authorize]
+@rendermode InteractiveServer
+
+@using System.Security.Claims
+@inject UserService Users
+
+<PageTitle>Your account — McServerMgmnt</PageTitle>
+
+<div class="page-head">
+    <span class="eyebrow">Your account</span>
+    <h1>@(account?.Username ?? "Account")</h1>
+    <p>Change the password you use to sign in to this console.</p>
+</div>
+
+<div class="page-body">
+    <div class="stack" style="max-width: 44rem;">
+
+        @if (account is null)
+        {
+            <div class="slot">
+                <div class="empty">Loading your account…</div>
+            </div>
+        }
+        else
+        {
+            @if (account.MustChangePassword)
+            {
+                <div class="notice notice--warn">
+                    <span>This account still uses the password it was created with. Change it now.</span>
+                </div>
+            }
+
+            <section class="slot">
+                <dl class="readout">
+                    <div class="readout-cell">
+                        <dt>Account level</dt>
+                        <dd style="font-size: 1.05rem;">@(account.IsAdministrator ? "Administrator" : "User")</dd>
+                    </div>
+                    <div class="readout-cell">
+                        <dt>Created</dt>
+                        <dd style="font-size: 1.05rem;" class="mono">@account.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd")</dd>
+                    </div>
+                    <div class="readout-cell">
+                        <dt>Last sign-in</dt>
+                        <dd style="font-size: 1.05rem;" class="mono">
+                            @(account.LastLoginAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "—")
+                        </dd>
+                    </div>
+                </dl>
+            </section>
+
+            <section class="slot">
+                <div class="slot-head">
+                    <h2>Change password</h2>
+                </div>
+                <div class="slot-body">
+                    @if (error is not null)
+                    {
+                        <div class="notice notice--error" style="margin-bottom: 1.15rem;" role="alert">
+                            <span>@error</span>
+                        </div>
+                    }
+                    @if (saved)
+                    {
+                        <div class="notice notice--good" style="margin-bottom: 1.15rem;" role="status">
+                            <span>Password changed. Use the new one next time you sign in.</span>
+                        </div>
+                    }
+
+                    <div class="field">
+                        <label for="current">Current password</label>
+                        <input id="current" type="password" autocomplete="current-password" @bind="currentPassword"/>
+                    </div>
+
+                    <div class="field">
+                        <label for="new">New password</label>
+                        <input id="new" type="password" autocomplete="new-password" @bind="newPassword"/>
+                        <span class="hint">At least @UserService.MinimumPasswordLength characters.</span>
+                    </div>
+
+                    <div class="field">
+                        <label for="confirm">Repeat new password</label>
+                        <input id="confirm" type="password" autocomplete="new-password" @bind="confirmPassword"/>
+                    </div>
+
+                    <button class="btn btn--primary" @onclick="ChangePasswordAsync" disabled="@busy">Change password</button>
+                </div>
+            </section>
+        }
+    </div>
+</div>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState> AuthenticationState { get; set; } = default!;
+
+    private UserAccount? account;
+    private int userId;
+
+    private string currentPassword = string.Empty;
+    private string newPassword = string.Empty;
+    private string confirmPassword = string.Empty;
+
+    private string? error;
+    private bool saved;
+    private bool busy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthenticationState;
+        userId = int.Parse(state.User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        account = await Users.GetByIdAsync(userId);
+    }
+
+    private async Task ChangePasswordAsync()
+    {
+        error = null;
+        saved = false;
+
+        if (newPassword != confirmPassword)
+        {
+            error = "The two new passwords do not match.";
+            return;
+        }
+
+        busy = true;
+
+        try
+        {
+            var result = await Users.ChangePasswordAsync(userId, currentPassword, newPassword);
+
+            if (!result.Succeeded)
+            {
+                error = result.Error;
+                return;
+            }
+
+            currentPassword = newPassword = confirmPassword = string.Empty;
+            saved = true;
+            account = await Users.GetByIdAsync(userId);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

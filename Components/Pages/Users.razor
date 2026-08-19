@@ -1,0 +1,257 @@
+@page "/users"
+@attribute [Authorize(Roles = UserRoles.Administrator)]
+@rendermode InteractiveServer
+
+@using System.Security.Claims
+@inject UserService UserStore
+
+<PageTitle>Accounts — McServerMgmnt</PageTitle>
+
+<div class="page-head">
+    <span class="eyebrow">Administration</span>
+    <h1>Accounts</h1>
+    <p>Everyone who can sign in to this console. Administrators manage accounts; users only manage the server.</p>
+</div>
+
+<div class="page-body">
+    <div class="stack">
+
+        @if (error is not null)
+        {
+            <div class="notice notice--error" role="alert"><span>@error</span></div>
+        }
+        @if (message is not null)
+        {
+            <div class="notice notice--good" role="status"><span>@message</span></div>
+        }
+
+        <section class="slot">
+            <div class="slot-head">
+                <h2>Accounts</h2>
+                <span class="eyebrow">@users.Count total</span>
+            </div>
+
+            <div class="table-scroll">
+                <table class="table">
+                    <thead>
+                    <tr>
+                        <th>Username</th>
+                        <th>Level</th>
+                        <th>Created</th>
+                        <th>Last sign-in</th>
+                        <th></th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var user in users)
+                    {
+                        <tr>
+                            <td>
+                                <strong>@user.Username</strong>
+                                @if (user.Id == currentUserId)
+                                {
+                                    <span class="tag tag--you" style="margin-left: 0.5rem;">You</span>
+                                }
+                                @if (user.MustChangePassword)
+                                {
+                                    <span class="tag" style="margin-left: 0.5rem;" title="Has not changed the password it was created with">New password pending</span>
+                                }
+                            </td>
+                            <td>
+                                @if (user.Id == currentUserId)
+                                {
+                                    <span class="tag tag--admin">Administrator</span>
+                                }
+                                else
+                                {
+                                    <select value="@user.Role" @onchange="e => SetRoleAsync(user, e.Value?.ToString())"
+                                            aria-label="@($"Account level for {user.Username}")" style="width: auto;">
+                                        <option value="@UserRoles.User">User</option>
+                                        <option value="@UserRoles.Administrator">Administrator</option>
+                                    </select>
+                                }
+                            </td>
+                            <td class="mono muted">@user.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd")</td>
+                            <td class="mono muted">@(user.LastLoginAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "never")</td>
+                            <td>
+                                <div class="row-actions">
+                                    <button class="btn btn--small" @onclick="() => BeginReset(user.Id)">Reset password</button>
+                                    @if (user.Id != currentUserId)
+                                    {
+                                        <button class="btn btn--small btn--danger" @onclick="() => deleteTargetId = user.Id">Delete</button>
+                                    }
+                                </div>
+                            </td>
+                        </tr>
+
+                        @if (resetTargetId == user.Id)
+                        {
+                            <tr>
+                                <td colspan="5" style="background-color: var(--stone-sunken);">
+                                    <div style="display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap;">
+                                        <label class="eyebrow" for="reset-password">New password for @user.Username</label>
+                                        <input id="reset-password" type="password" autocomplete="new-password"
+                                               @bind="resetPassword" style="width: 16rem;"/>
+                                        <button class="btn btn--small btn--primary" @onclick="() => ResetPasswordAsync(user)">Set password</button>
+                                        <button class="btn btn--small btn--link" @onclick="CancelReset">Cancel</button>
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+
+                        @if (deleteTargetId == user.Id)
+                        {
+                            <tr>
+                                <td colspan="5" style="background-color: var(--redstone-soft);">
+                                    <div style="display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap;">
+                                        <span>Delete <strong>@user.Username</strong>? They lose access immediately.</span>
+                                        <button class="btn btn--small btn--danger" @onclick="() => DeleteAsync(user)">Delete account</button>
+                                        <button class="btn btn--small btn--link" @onclick="() => deleteTargetId = null">Keep it</button>
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    }
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="slot" style="max-width: 34rem;">
+            <div class="slot-head">
+                <h2>Add an account</h2>
+            </div>
+            <div class="slot-body">
+                <div class="field">
+                    <label for="new-username">Username</label>
+                    <input id="new-username" type="text" autocomplete="off" @bind="newUsername"/>
+                    <span class="hint">Letters, digits, underscore, hyphen and dot. Stored lowercase.</span>
+                </div>
+
+                <div class="field">
+                    <label for="new-password">Password</label>
+                    <input id="new-password" type="password" autocomplete="new-password" @bind="newPassword"/>
+                    <span class="hint">At least @UserService.MinimumPasswordLength characters. Share it with them, they can change it later.</span>
+                </div>
+
+                <div class="field">
+                    <label for="new-role">Account level</label>
+                    <select id="new-role" @bind="newRole">
+                        <option value="@UserRoles.User">User — manages the server</option>
+                        <option value="@UserRoles.Administrator">Administrator — also manages accounts</option>
+                    </select>
+                </div>
+
+                <button class="btn btn--primary" @onclick="CreateAsync" disabled="@busy">Add account</button>
+            </div>
+        </section>
+    </div>
+</div>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState> AuthenticationState { get; set; } = default!;
+
+    private List<UserAccount> users = [];
+    private int currentUserId;
+
+    private string newUsername = string.Empty;
+    private string newPassword = string.Empty;
+    private string newRole = UserRoles.User;
+
+    private int? resetTargetId;
+    private string resetPassword = string.Empty;
+    private int? deleteTargetId;
+
+    private string? error;
+    private string? message;
+    private bool busy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthenticationState;
+        currentUserId = int.Parse(state.User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        users = await UserStore.GetUsersAsync();
+    }
+
+    private void BeginReset(int userId)
+    {
+        resetTargetId = userId;
+        resetPassword = string.Empty;
+        deleteTargetId = null;
+    }
+
+    private void CancelReset()
+    {
+        resetTargetId = null;
+        resetPassword = string.Empty;
+    }
+
+    private async Task CreateAsync()
+    {
+        await ApplyAsync(
+            () => UserStore.CreateUserAsync(newUsername, newPassword, newRole),
+            $"Added {UserService.Normalize(newUsername)}.",
+            onSuccess: () =>
+            {
+                newUsername = string.Empty;
+                newPassword = string.Empty;
+                newRole = UserRoles.User;
+            });
+    }
+
+    private async Task SetRoleAsync(UserAccount user, string? role)
+    {
+        if (role is null)
+        {
+            return;
+        }
+
+        var label = role == UserRoles.Administrator ? "an administrator" : "a user";
+        await ApplyAsync(() => UserStore.SetRoleAsync(user.Id, role), $"{user.Username} is now {label}.");
+    }
+
+    private async Task ResetPasswordAsync(UserAccount user)
+    {
+        await ApplyAsync(
+            () => UserStore.ResetPasswordAsync(user.Id, resetPassword),
+            $"Set a new password for {user.Username}.",
+            onSuccess: CancelReset);
+    }
+
+    private async Task DeleteAsync(UserAccount user)
+    {
+        await ApplyAsync(
+            () => UserStore.DeleteUserAsync(user.Id),
+            $"Deleted {user.Username}.",
+            onSuccess: () => deleteTargetId = null);
+    }
+
+    /// <summary>Runs one account change, then reloads the table so it always shows what is stored.</summary>
+    private async Task ApplyAsync(Func<Task<OperationResult>> operation, string successMessage, Action? onSuccess = null)
+    {
+        busy = true;
+        error = null;
+        message = null;
+
+        try
+        {
+            var result = await operation();
+
+            if (result.Succeeded)
+            {
+                message = successMessage;
+                onSuccess?.Invoke();
+            }
+            else
+            {
+                error = result.Error;
+            }
+
+            users = await UserStore.GetUsersAsync();
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

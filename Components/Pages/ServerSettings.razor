@@ -1,0 +1,245 @@
+@page "/settings"
+@attribute [Authorize]
+@rendermode InteractiveServer
+
+@inject IServerSettingsStore SettingsStore
+
+<PageTitle>Server settings — McServerMgmnt</PageTitle>
+
+<div class="page-head">
+    <span class="eyebrow">Server</span>
+    <h1>Server settings</h1>
+    <p>The contents of <span class="mono">server.properties</span>. Change what you need, then save — nothing is written until you do.</p>
+</div>
+
+<div class="page-body">
+    <div class="stack">
+
+        @if (!SettingsStore.IsConnected)
+        {
+            <div class="notice notice--warn">
+                <span>
+                    <strong>No properties file is wired up yet.</strong> These are sample values.
+                    Implement <span class="mono">IServerSettingsStore</span> in
+                    <span class="mono">Services/ServerSettings.cs</span> and register it in
+                    <span class="mono">Program.cs</span> — this table reads and writes everything through that interface.
+                </span>
+            </div>
+        }
+
+        @if (error is not null)
+        {
+            <div class="notice notice--error" role="alert"><span>@error</span></div>
+        }
+        @if (message is not null)
+        {
+            <div class="notice notice--good" role="status"><span>@message</span></div>
+        }
+
+        <section class="slot">
+            <div class="slot-head">
+                <h2>Settings</h2>
+                <input type="search" placeholder="Filter settings" @bind="filter" @bind:event="oninput"
+                       aria-label="Filter settings" style="width: 14rem;"/>
+            </div>
+
+            @if (settings.Count == 0)
+            {
+                <div class="empty">Reading the settings…</div>
+            }
+            else if (Visible.Count == 0)
+            {
+                <div class="empty">
+                    <h3>No setting matches “@filter”</h3>
+                    <p class="muted" style="margin: 0;">Try the properties key instead, like <span class="mono">max-players</span>.</p>
+                </div>
+            }
+            else
+            {
+                <div class="table-scroll">
+                    <table class="table table--settings">
+                        <thead>
+                        <tr>
+                            <th>Setting</th>
+                            <th>Value</th>
+                            <th></th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        @foreach (var group in Visible.GroupBy(s => s.Group))
+                        {
+                            <tr class="group-row">
+                                <td colspan="3"><span class="eyebrow">@group.Key</span></td>
+                            </tr>
+
+                            @foreach (var setting in group)
+                            {
+                                var changed = IsChanged(setting);
+
+                                <tr data-changed="@ChangedMarker(changed)">
+                                    <td>
+                                        <strong>@setting.Label</strong>
+                                        <span class="setting-key mono">@setting.Key</span>
+                                        <span class="setting-help">@setting.Description</span>
+                                    </td>
+                                    <td class="setting-value">
+                                        @switch (setting.Kind)
+                                        {
+                                            case SettingKind.Toggle:
+                                                <label class="check">
+                                                    <input type="checkbox" checked="@IsOn(setting)"
+                                                           @onchange="e => SetToggle(setting, e.Value)"
+                                                           aria-label="@setting.Label"/>
+                                                    <span>@ToggleLabel(setting)</span>
+                                                </label>
+                                                break;
+
+                                            case SettingKind.Choice:
+                                                <select value="@Value(setting)" aria-label="@setting.Label"
+                                                        @onchange="e => Set(setting, e.Value?.ToString())">
+                                                    @foreach (var choice in setting.Choices ?? [])
+                                                    {
+                                                        <option value="@choice">@choice</option>
+                                                    }
+                                                </select>
+                                                break;
+
+                                            case SettingKind.Number:
+                                                <input type="number" value="@Value(setting)" aria-label="@setting.Label"
+                                                       min="@setting.Minimum" max="@setting.Maximum"
+                                                       @onchange="e => Set(setting, e.Value?.ToString())"/>
+                                                break;
+
+                                            default:
+                                                <input type="text" value="@Value(setting)" aria-label="@setting.Label"
+                                                       @onchange="e => Set(setting, e.Value?.ToString())"/>
+                                                break;
+                                        }
+                                    </td>
+                                    <td>
+                                        <div class="row-actions">
+                                            @if (changed && setting.RequiresRestart)
+                                            {
+                                                <span class="tag tag--admin">Restart to apply</span>
+                                            }
+                                            @if (changed)
+                                            {
+                                                <button class="btn btn--small btn--link" @onclick="() => Revert(setting)">Undo</button>
+                                            }
+                                        </div>
+                                    </td>
+                                </tr>
+                            }
+                        }
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="command-bar">
+                    <span class="muted" style="flex: 1;">
+                        @(edits.Count switch
+                        {
+                            0 => "No unsaved changes.",
+                            1 => "1 unsaved change.",
+                            _ => $"{edits.Count} unsaved changes."
+                        })
+                    </span>
+                    <button class="btn btn--small" @onclick="DiscardAll" disabled="@(busy || edits.Count == 0)">Discard changes</button>
+                    <button class="btn btn--small btn--primary" @onclick="SaveAsync" disabled="@(busy || edits.Count == 0)">Save changes</button>
+                </div>
+            }
+        </section>
+    </div>
+</div>
+
+@code {
+    private IReadOnlyList<ServerSetting> settings = [];
+
+    /// <summary>Pending edits, keyed by properties key. A key is present only while it differs from what is stored.</summary>
+    private readonly Dictionary<string, string> edits = [];
+
+    private string filter = string.Empty;
+    private string? error;
+    private string? message;
+    private bool busy;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        settings = await SettingsStore.GetSettingsAsync();
+        edits.Clear();
+    }
+
+    private List<ServerSetting> Visible =>
+        string.IsNullOrWhiteSpace(filter)
+            ? settings.ToList()
+            : settings.Where(s =>
+                s.Key.Contains(filter, StringComparison.OrdinalIgnoreCase)
+                || s.Label.Contains(filter, StringComparison.OrdinalIgnoreCase)
+                || s.Description.Contains(filter, StringComparison.OrdinalIgnoreCase)
+                || s.Group.Contains(filter, StringComparison.OrdinalIgnoreCase)).ToList();
+
+    private string Value(ServerSetting setting) =>
+        edits.TryGetValue(setting.Key, out var edited) ? edited : setting.Value;
+
+    private bool IsChanged(ServerSetting setting) => edits.ContainsKey(setting.Key);
+
+    private static string? ChangedMarker(bool changed) => changed ? "yes" : null;
+
+    private bool IsOn(ServerSetting setting) => Value(setting) == "true";
+
+    private string ToggleLabel(ServerSetting setting) => IsOn(setting) ? "On" : "Off";
+
+    private void SetToggle(ServerSetting setting, object? value) =>
+        Set(setting, value is true ? "true" : "false");
+
+    private void Set(ServerSetting setting, string? value)
+    {
+        value ??= string.Empty;
+        message = null;
+
+        // Editing a value back to what is stored is not a change.
+        if (value == setting.Value)
+        {
+            edits.Remove(setting.Key);
+        }
+        else
+        {
+            edits[setting.Key] = value;
+        }
+    }
+
+    private void Revert(ServerSetting setting) => edits.Remove(setting.Key);
+
+    private void DiscardAll()
+    {
+        edits.Clear();
+        message = null;
+        error = null;
+    }
+
+    private async Task SaveAsync()
+    {
+        busy = true;
+        error = null;
+        message = null;
+
+        var count = edits.Count;
+
+        try
+        {
+            await SettingsStore.SaveAsync(new Dictionary<string, string>(edits));
+            await LoadAsync();
+            message = count == 1 ? "Saved 1 setting." : $"Saved {count} settings.";
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

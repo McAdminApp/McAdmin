@@ -1,0 +1,974 @@
+/* ==========================================================================
+   McServerMgmnt — "Deepslate console"
+
+   The visual grammar is borrowed from the thing being administered: stone
+   panels with a one-pixel lit top edge and a dark bottom edge (the way a
+   Minecraft inventory slot reads), a faint chunk grid behind everything, and
+   a single warm light source. Green is reserved for one meaning only —
+   "the server is up" — so the brand accent is torchlight amber instead.
+   ========================================================================== */
+
+:root {
+    /* Surfaces */
+    --deepslate: #16181c;
+    --deepslate-deep: #101216;
+    --stone: #22252b;
+    --stone-raised: #2a2e36;
+    --stone-sunken: #1a1c21;
+
+    /* Edges: the slot bevel */
+    --edge-lit: rgba(255, 255, 255, 0.055);
+    --edge-shadow: rgba(0, 0, 0, 0.5);
+    --edge-line: #0e1013;
+    --hairline: #31353d;
+
+    /* Light */
+    --torch: #f2a33c;
+    --torch-soft: rgba(242, 163, 60, 0.14);
+    --torch-deep: #9a6417;
+
+    /* Meaning */
+    --emerald: #4cc38a;
+    --emerald-soft: rgba(76, 195, 138, 0.13);
+    --redstone: #e0503f;
+    --redstone-soft: rgba(224, 80, 63, 0.13);
+
+    /* Type */
+    --bone: #e9e6df;
+    --ash: #9aa1ac;
+    --ash-dim: #6c737e;
+
+    --font-display: "Chakra Petch", "Segoe UI Semibold", system-ui, sans-serif;
+    --font-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+
+    --radius: 3px;
+    --sidebar-w: 15.5rem;
+}
+
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+}
+
+html {
+    -webkit-text-size-adjust: 100%;
+}
+
+body {
+    margin: 0;
+    min-height: 100vh;
+    font-family: var(--font-body);
+    font-size: 0.9375rem;
+    line-height: 1.55;
+    color: var(--bone);
+    background-color: var(--deepslate);
+    /* Chunk grid: 16px blocks, every 8th line brighter — the F3 chunk border. */
+    background-image:
+        linear-gradient(var(--edge-lit) 1px, transparent 1px),
+        linear-gradient(90deg, var(--edge-lit) 1px, transparent 1px),
+        linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+    background-size: 8rem 8rem, 8rem 8rem, 1rem 1rem, 1rem 1rem;
+}
+
+h1, h2, h3, h4 {
+    font-family: var(--font-display);
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    margin: 0;
+}
+
+a {
+    color: var(--torch);
+    text-decoration: none;
+}
+
+a:hover {
+    text-decoration: underline;
+}
+
+:focus-visible {
+    outline: 2px solid var(--torch);
+    outline-offset: 2px;
+}
+
+/* --------------------------------------------------------------------------
+   The slot: every surface in the app is one of these
+   -------------------------------------------------------------------------- */
+
+.slot {
+    background-color: var(--stone);
+    border: 1px solid var(--edge-line);
+    border-radius: var(--radius);
+    box-shadow:
+        inset 1px 1px 0 var(--edge-lit),
+        inset -1px -1px 0 var(--edge-shadow),
+        0 2px 0 rgba(0, 0, 0, 0.3);
+}
+
+.slot--sunken {
+    background-color: var(--stone-sunken);
+    box-shadow:
+        inset 1px 1px 0 rgba(0, 0, 0, 0.55),
+        inset -1px -1px 0 var(--edge-lit);
+}
+
+.slot-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.85rem 1.15rem;
+    border-bottom: 1px solid var(--edge-line);
+    box-shadow: 0 1px 0 var(--edge-lit);
+}
+
+.slot-head h2 {
+    font-size: 0.9rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.slot-body {
+    padding: 1.15rem;
+}
+
+.eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ash-dim);
+}
+
+.muted {
+    color: var(--ash);
+}
+
+.mono {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+}
+
+/* --------------------------------------------------------------------------
+   The block — signature element.
+   An isometric cube drawn from three clipped faces. Its colour is the
+   server's state, so the shape carries information rather than decoration.
+   -------------------------------------------------------------------------- */
+
+.block {
+    position: relative;
+    isolation: isolate;
+    width: var(--block-size, 6rem);
+    height: var(--block-size, 6rem);
+    flex: none;
+    --face: var(--ash-dim);
+}
+
+.block::after {
+    /* torchlight pooling under the block */
+    content: "";
+    position: absolute;
+    inset: -35%;
+    background: radial-gradient(circle at 50% 55%, var(--face), transparent 62%);
+    opacity: 0.16;
+    z-index: -1;
+}
+
+.block-face {
+    position: absolute;
+    inset: 0;
+    background-color: var(--face);
+}
+
+.block-top {
+    clip-path: polygon(50% 0, 100% 25%, 50% 50%, 0 25%);
+    filter: brightness(1.35);
+}
+
+.block-left {
+    clip-path: polygon(0 25%, 50% 50%, 50% 100%, 0 75%);
+    filter: brightness(0.6);
+}
+
+.block-right {
+    clip-path: polygon(50% 50%, 100% 25%, 100% 75%, 50% 100%);
+    filter: brightness(0.9);
+}
+
+.block[data-state="running"] { --face: var(--emerald); }
+.block[data-state="stopped"] { --face: #545b66; }
+.block[data-state="pending"] { --face: var(--torch); }
+.block[data-state="error"]   { --face: var(--redstone); }
+
+.block[data-state="pending"] .block-face {
+    animation: beacon 1.4s ease-in-out infinite;
+}
+
+@keyframes beacon {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.45; }
+}
+
+.block--mark {
+    --block-size: 1.5rem;
+}
+
+/* --------------------------------------------------------------------------
+   App shell
+   -------------------------------------------------------------------------- */
+
+.shell {
+    display: flex;
+    min-height: 100vh;
+}
+
+.sidebar {
+    width: var(--sidebar-w);
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    background-color: var(--deepslate-deep);
+    border-right: 1px solid var(--edge-line);
+    box-shadow: 1px 0 0 var(--edge-lit);
+    position: sticky;
+    top: 0;
+    height: 100vh;
+}
+
+.brand {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    padding: 1.15rem 1.15rem 1.05rem;
+    border-bottom: 1px solid var(--edge-line);
+}
+
+.brand-name {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 1.02rem;
+    letter-spacing: 0.02em;
+    color: var(--bone);
+    line-height: 1.1;
+}
+
+.brand-sub {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--ash-dim);
+}
+
+.brand-name:hover {
+    text-decoration: none;
+}
+
+.nav {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    padding: 0.9rem 0.7rem;
+    flex: 1;
+    overflow-y: auto;
+}
+
+.nav-section {
+    padding: 1rem 0.55rem 0.35rem;
+}
+
+.nav-link {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    padding: 0.55rem 0.6rem;
+    border-radius: var(--radius);
+    color: var(--ash);
+    font-weight: 500;
+    border-left: 2px solid transparent;
+}
+
+.nav-link:hover {
+    background-color: rgba(255, 255, 255, 0.04);
+    color: var(--bone);
+    text-decoration: none;
+}
+
+.nav-link.active {
+    background-color: var(--torch-soft);
+    border-left-color: var(--torch);
+    color: var(--bone);
+}
+
+.nav-glyph {
+    width: 0.85rem;
+    height: 0.85rem;
+    flex: none;
+    background-color: currentColor;
+    opacity: 0.75;
+}
+
+/* Small pixel glyphs, cut from a square — no icon font needed. */
+.glyph-console { clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%, 0 70%, 70% 70%, 70% 30%, 0 30%); }
+.glyph-account { clip-path: circle(50% at 50% 50%); }
+.glyph-users   { clip-path: polygon(0 0, 45% 0, 45% 45%, 0 45%, 0 0, 55% 55%, 100% 55%, 100% 100%, 55% 100%); }
+.glyph-settings{ clip-path: polygon(0 10%, 100% 10%, 100% 35%, 0 35%, 0 65%, 100% 65%, 100% 90%, 0 90%); }
+
+.sidebar-foot {
+    border-top: 1px solid var(--edge-line);
+    padding: 0.9rem;
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+}
+
+.avatar {
+    width: 2rem;
+    height: 2rem;
+    flex: none;
+    display: grid;
+    place-items: center;
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 0.85rem;
+    color: var(--deepslate-deep);
+    background-color: var(--torch);
+    border-radius: var(--radius);
+    text-transform: uppercase;
+}
+
+.sidebar-identity {
+    min-width: 0;
+    flex: 1;
+}
+
+.sidebar-identity strong {
+    display: block;
+    font-size: 0.85rem;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.page-head {
+    padding: 2.2rem 2rem 1.35rem;
+    border-bottom: 1px solid var(--edge-line);
+}
+
+.page-head h1 {
+    font-size: 1.6rem;
+    line-height: 1.2;
+    margin-top: 0.2rem;
+}
+
+.page-head p {
+    margin: 0.45rem 0 0;
+    color: var(--ash);
+    max-width: 52ch;
+}
+
+.page-body {
+    padding: 1.6rem 2rem 3rem;
+    flex: 1;
+}
+
+.stack {
+    display: flex;
+    flex-direction: column;
+    gap: 1.15rem;
+    max-width: 68rem;
+}
+
+.grid-2 {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr));
+    gap: 1.15rem;
+}
+
+/* --------------------------------------------------------------------------
+   Controls
+   -------------------------------------------------------------------------- */
+
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    font-family: var(--font-display);
+    font-size: 0.85rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    padding: 0.55rem 1.1rem;
+    color: var(--bone);
+    background-color: var(--stone-raised);
+    border: 1px solid var(--edge-line);
+    border-radius: var(--radius);
+    box-shadow:
+        inset 1px 1px 0 var(--edge-lit),
+        inset -1px -1px 0 var(--edge-shadow),
+        0 2px 0 rgba(0, 0, 0, 0.35);
+    cursor: pointer;
+    transition: transform 0.08s ease, background-color 0.12s ease;
+}
+
+.btn:hover:not(:disabled) {
+    background-color: #333842;
+    text-decoration: none;
+}
+
+.btn:active:not(:disabled) {
+    transform: translateY(2px);
+    box-shadow: inset 1px 1px 0 var(--edge-shadow);
+}
+
+.btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.btn--primary {
+    background-color: var(--torch);
+    color: #221706;
+    border-color: #7d5011;
+}
+
+.btn--primary:hover:not(:disabled) {
+    background-color: #ffb857;
+}
+
+.btn--danger {
+    background-color: transparent;
+    color: var(--redstone);
+    border-color: rgba(224, 80, 63, 0.4);
+}
+
+.btn--danger:hover:not(:disabled) {
+    background-color: var(--redstone-soft);
+}
+
+.btn--block {
+    width: 100%;
+}
+
+.btn--small {
+    font-size: 0.75rem;
+    padding: 0.35rem 0.7rem;
+}
+
+.btn--link {
+    background: none;
+    border: none;
+    box-shadow: none;
+    color: var(--ash);
+    padding: 0.35rem 0.5rem;
+}
+
+.btn--link:hover:not(:disabled) {
+    background: none;
+    color: var(--bone);
+    text-decoration: underline;
+}
+
+.field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    margin-bottom: 1rem;
+}
+
+.field label {
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--ash);
+}
+
+.field .hint {
+    font-size: 0.78rem;
+    color: var(--ash-dim);
+}
+
+input[type="text"],
+input[type="password"],
+input[type="number"],
+input[type="search"],
+select {
+    font-family: var(--font-body);
+    font-size: 0.9rem;
+    color: var(--bone);
+    background-color: var(--stone-sunken);
+    border: 1px solid var(--edge-line);
+    border-radius: var(--radius);
+    padding: 0.55rem 0.7rem;
+    box-shadow: inset 1px 1px 0 rgba(0, 0, 0, 0.5);
+    width: 100%;
+}
+
+input::placeholder {
+    color: var(--ash-dim);
+}
+
+input:focus,
+select:focus {
+    outline: none;
+    border-color: var(--torch-deep);
+    box-shadow: inset 1px 1px 0 rgba(0, 0, 0, 0.5), 0 0 0 2px var(--torch-soft);
+}
+
+select {
+    appearance: none;
+    background-image: linear-gradient(45deg, transparent 50%, var(--ash) 50%), linear-gradient(135deg, var(--ash) 50%, transparent 50%);
+    background-position: right 1rem center, right 0.7rem center;
+    background-size: 0.3rem 0.3rem, 0.3rem 0.3rem;
+    background-repeat: no-repeat;
+    padding-right: 2rem;
+}
+
+.validation-message,
+.field-error {
+    color: var(--redstone);
+    font-size: 0.8rem;
+}
+
+/* --------------------------------------------------------------------------
+   Status pieces
+   -------------------------------------------------------------------------- */
+
+.tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 0.2rem 0.5rem;
+    border-radius: var(--radius);
+    border: 1px solid var(--hairline);
+    color: var(--ash);
+    background-color: var(--stone-sunken);
+}
+
+.tag--admin {
+    color: var(--torch);
+    border-color: rgba(242, 163, 60, 0.35);
+    background-color: var(--torch-soft);
+}
+
+.tag--online {
+    color: var(--emerald);
+    border-color: rgba(76, 195, 138, 0.35);
+    background-color: var(--emerald-soft);
+}
+
+.tag--you {
+    color: var(--bone);
+}
+
+.notice {
+    display: flex;
+    gap: 0.75rem;
+    align-items: flex-start;
+    padding: 0.8rem 1rem;
+    border-radius: var(--radius);
+    border: 1px solid var(--hairline);
+    background-color: var(--stone-sunken);
+    font-size: 0.87rem;
+}
+
+.notice::before {
+    content: "";
+    width: 0.4rem;
+    align-self: stretch;
+    flex: none;
+    border-radius: 1px;
+    background-color: var(--ash-dim);
+}
+
+.notice--warn::before { background-color: var(--torch); }
+.notice--error::before { background-color: var(--redstone); }
+.notice--good::before { background-color: var(--emerald); }
+
+.notice--error { color: #f3b4ac; }
+.notice--good { color: #a9e3c6; }
+
+.readout {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+}
+
+.readout-cell {
+    padding: 0.95rem 1.15rem;
+    border-left: 1px solid var(--edge-line);
+}
+
+.readout-cell:first-child {
+    border-left: none;
+}
+
+.readout-cell dt {
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ash-dim);
+    margin: 0 0 0.3rem;
+}
+
+.readout-cell dd {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: 1.3rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+.readout-cell dd small {
+    font-size: 0.75rem;
+    font-weight: 400;
+    color: var(--ash-dim);
+    margin-left: 0.25rem;
+}
+
+/* --------------------------------------------------------------------------
+   Tables
+   -------------------------------------------------------------------------- */
+
+.table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.88rem;
+}
+
+.table th {
+    text-align: left;
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ash-dim);
+    font-weight: 400;
+    padding: 0.7rem 1.15rem;
+    border-bottom: 1px solid var(--edge-line);
+}
+
+.table td {
+    padding: 0.75rem 1.15rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.035);
+    vertical-align: middle;
+}
+
+.table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.table tbody tr:hover {
+    background-color: rgba(255, 255, 255, 0.02);
+}
+
+.table-scroll {
+    overflow-x: auto;
+}
+
+.row-actions {
+    display: flex;
+    gap: 0.4rem;
+    justify-content: flex-end;
+}
+
+.empty {
+    padding: 2.5rem 1.15rem;
+    text-align: center;
+    color: var(--ash);
+}
+
+.empty h3 {
+    font-size: 1rem;
+    margin-bottom: 0.35rem;
+    color: var(--bone);
+}
+
+/* --------------------------------------------------------------------------
+   Settings table
+   -------------------------------------------------------------------------- */
+
+.table--settings td {
+    vertical-align: top;
+}
+
+.table--settings td:first-child {
+    max-width: 28rem;
+}
+
+.setting-key {
+    margin-left: 0.5rem;
+    font-size: 0.72rem;
+    color: var(--ash-dim);
+}
+
+.setting-help {
+    display: block;
+    margin-top: 0.15rem;
+    font-size: 0.82rem;
+    color: var(--ash);
+}
+
+.setting-value input[type="text"] {
+    max-width: 18rem;
+}
+
+.setting-value input[type="number"] {
+    max-width: 8rem;
+}
+
+.setting-value select {
+    max-width: 14rem;
+}
+
+/* Group headers live inside the table so the whole list stays one scan. */
+.group-row td {
+    padding-top: 1.5rem;
+    padding-bottom: 0.4rem;
+    border-bottom: 1px solid var(--edge-line);
+}
+
+.table tbody tr.group-row:hover {
+    background-color: transparent;
+}
+
+.table tbody tr:first-child.group-row td {
+    padding-top: 0.9rem;
+}
+
+/* An edited row keeps a torch-lit edge until it is saved or undone. */
+.table tbody tr[data-changed] td:first-child {
+    box-shadow: inset 2px 0 0 var(--torch);
+}
+
+.check {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    cursor: pointer;
+    user-select: none;
+}
+
+.check input {
+    appearance: none;
+    width: 1.15rem;
+    height: 1.15rem;
+    margin: 0;
+    flex: none;
+    cursor: pointer;
+    background-color: var(--stone-sunken);
+    border: 1px solid var(--edge-line);
+    border-radius: 2px;
+    box-shadow: inset 1px 1px 0 rgba(0, 0, 0, 0.55);
+}
+
+.check input:checked {
+    background-color: var(--torch);
+    border-color: #7d5011;
+    box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.3);
+}
+
+.check input:checked::after {
+    content: "";
+    display: block;
+    width: 100%;
+    height: 100%;
+    background-color: #221706;
+    clip-path: polygon(16% 46%, 40% 68%, 84% 20%, 94% 32%, 40% 90%, 6% 58%);
+}
+
+/* --------------------------------------------------------------------------
+   Console readout (dashboard template)
+   -------------------------------------------------------------------------- */
+
+.console {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    line-height: 1.7;
+    padding: 0.9rem 1.1rem;
+    max-height: 17rem;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.console-line {
+    display: flex;
+    gap: 0.75rem;
+}
+
+.console-time {
+    color: var(--ash-dim);
+    flex: none;
+}
+
+.console-line[data-level="warn"] .console-text { color: var(--torch); }
+.console-line[data-level="error"] .console-text { color: var(--redstone); }
+.console-line[data-level="join"] .console-text { color: var(--emerald); }
+
+.command-bar {
+    display: flex;
+    gap: 0.6rem;
+    align-items: center;
+    padding: 0.9rem 1.15rem;
+    border-top: 1px solid var(--edge-line);
+    box-shadow: inset 0 1px 0 var(--edge-lit);
+}
+
+.command-bar input {
+    flex: 1;
+    min-width: 0;
+}
+
+/* --------------------------------------------------------------------------
+   Sign in
+   -------------------------------------------------------------------------- */
+
+.gate {
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    padding: 2rem 1.25rem;
+}
+
+.gate-card {
+    width: 100%;
+    max-width: 23rem;
+}
+
+.gate-mark {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1.75rem;
+    text-align: center;
+}
+
+.gate-mark .block {
+    --block-size: 5rem;
+    animation: hover-bob 5s ease-in-out infinite;
+}
+
+@keyframes hover-bob {
+    0%, 100% { transform: translateY(-0.2rem); }
+    50% { transform: translateY(0.35rem); }
+}
+
+.gate-mark h1 {
+    font-size: 1.35rem;
+    letter-spacing: 0.03em;
+}
+
+.gate-card .slot-body {
+    padding: 1.5rem;
+}
+
+/* --------------------------------------------------------------------------
+   Responsive
+   -------------------------------------------------------------------------- */
+
+.sidebar-toggle {
+    display: none;
+}
+
+@media (max-width: 56rem) {
+    .shell {
+        flex-direction: column;
+    }
+
+    .sidebar {
+        width: 100%;
+        height: auto;
+        position: static;
+        border-right: none;
+        border-bottom: 1px solid var(--edge-line);
+        position: relative;
+    }
+
+    .sidebar-toggle {
+        display: block;
+        position: absolute;
+        top: 1.15rem;
+        right: 1rem;
+        width: 2.5rem;
+        height: 2.5rem;
+        appearance: none;
+        margin: 0;
+        cursor: pointer;
+        background-color: var(--stone);
+        border: 1px solid var(--edge-line);
+        border-radius: var(--radius);
+        background-image: linear-gradient(var(--bone) 2px, transparent 2px);
+        background-size: 1rem 0.5rem;
+        background-position: center 0.75rem;
+        background-repeat: repeat-y;
+    }
+
+    .nav,
+    .sidebar-foot {
+        display: none;
+    }
+
+    .sidebar-toggle:checked ~ .nav,
+    .sidebar-toggle:checked ~ .sidebar-foot {
+        display: flex;
+    }
+
+    .page-head {
+        padding: 1.5rem 1.15rem 1.15rem;
+    }
+
+    .page-body {
+        padding: 1.15rem 1.15rem 3rem;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.001ms !important;
+    }
+}
+
+/* Blazor's own error strip, recoloured to match. */
+#blazor-error-ui {
+    color: var(--bone);
+    background-color: var(--stone-raised);
+    border-top: 2px solid var(--redstone);
+    bottom: 0;
+    box-shadow: 0 -1px 12px rgba(0, 0, 0, 0.5);
+    display: none;
+    left: 0;
+    padding: 0.7rem 1.25rem;
+    position: fixed;
+    width: 100%;
+    z-index: 1000;
+}
+
+#blazor-error-ui .dismiss {
+    cursor: pointer;
+    position: absolute;
+    right: 0.75rem;
+    top: 0.5rem;
+}

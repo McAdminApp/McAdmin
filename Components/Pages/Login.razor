@@ -1,0 +1,128 @@
+@page "/login"
+@layout GateLayout
+@attribute [AllowAnonymous]
+
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Authentication
+@using Microsoft.AspNetCore.Authentication.Cookies
+
+@inject UserService Users
+@inject NavigationManager Navigation
+@inject IWebHostEnvironment Environment
+
+<PageTitle>Sign in — McServerMgmnt</PageTitle>
+
+<div class="gate-card">
+    <div class="gate-mark">
+        <StatusBlock State="@MarkState" Label="McServerMgmnt"/>
+        <div>
+            <h1>McServerMgmnt</h1>
+            <span class="eyebrow">Minecraft server console</span>
+        </div>
+    </div>
+
+    <div class="slot">
+        <div class="slot-body">
+            <EditForm Model="Input" FormName="signin" OnValidSubmit="SignInAsync" method="post">
+                <DataAnnotationsValidator/>
+
+                @if (error is not null)
+                {
+                    <div class="notice notice--error" style="margin-bottom: 1rem;" role="alert">@error</div>
+                }
+
+                <div class="field">
+                    <label for="username">Username</label>
+                    <InputText id="username" @bind-Value="Input!.Username" autocomplete="username" autofocus/>
+                </div>
+
+                <div class="field">
+                    <label for="password">Password</label>
+                    <InputText id="password" type="password" @bind-Value="Input!.Password" autocomplete="current-password"/>
+                </div>
+
+                <button type="submit" class="btn btn--primary btn--block">Sign in</button>
+            </EditForm>
+        </div>
+    </div>
+
+    @if (showFirstRunHint)
+    {
+        <div class="notice notice--warn" style="margin-top: 1rem;">
+            <span>
+                First run: sign in as <strong class="mono">@DbInitializer.DefaultAdminUsername</strong> /
+                <strong class="mono">@DbInitializer.DefaultAdminPassword</strong>, then change the password.
+                This hint only shows in development.
+            </span>
+        </div>
+    }
+</div>
+
+@code {
+    [CascadingParameter] private HttpContext HttpContext { get; set; } = default!;
+
+    [SupplyParameterFromForm(FormName = "signin")]
+    private SignInInput? Input { get; set; }
+
+    [SupplyParameterFromQuery] private string? ReturnUrl { get; set; }
+
+    private string? error;
+    private bool showFirstRunHint;
+    private string MarkState => error is null ? "running" : "error";
+
+    protected override async Task OnInitializedAsync()
+    {
+        Input ??= new SignInInput();
+
+        if (HttpContext.User.Identity?.IsAuthenticated is true)
+        {
+            Navigation.NavigateTo("/", forceLoad: false, replace: true);
+            return;
+        }
+
+        // Only ever leak the seeded credentials on a developer machine.
+        if (Environment.IsDevelopment())
+        {
+            var admin = await Users.GetByUsernameAsync(DbInitializer.DefaultAdminUsername);
+            showFirstRunHint = admin is { MustChangePassword: true };
+        }
+    }
+
+    private async Task SignInAsync()
+    {
+        var user = await Users.ValidateCredentialsAsync(Input!.Username, Input.Password);
+
+        if (user is null)
+        {
+            error = "That username and password do not match an account.";
+            Input.Password = string.Empty;
+            return;
+        }
+
+        var identity = new ClaimsIdentity(
+            [
+                new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
+                new Claim(ClaimTypes.Name, user.Username),
+                new Claim(ClaimTypes.Role, user.Role)
+            ],
+            CookieAuthenticationDefaults.AuthenticationScheme);
+
+        await HttpContext.SignInAsync(
+            CookieAuthenticationDefaults.AuthenticationScheme,
+            new ClaimsPrincipal(identity));
+
+        Navigation.NavigateTo(SafeReturnUrl(), forceLoad: true);
+    }
+
+    /// <summary>Only ever redirect back inside this app.</summary>
+    private string SafeReturnUrl() =>
+        !string.IsNullOrEmpty(ReturnUrl) && ReturnUrl.StartsWith('/') && !ReturnUrl.StartsWith("//")
+            ? ReturnUrl
+            : "/";
+
+    private sealed class SignInInput
+    {
+        public string Username { get; set; } = string.Empty;
+        public string Password { get; set; } = string.Empty;
+    }
+}

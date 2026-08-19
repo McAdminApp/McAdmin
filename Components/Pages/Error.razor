@@ -1,0 +1,39 @@
+@page "/Error"
+@attribute [AllowAnonymous]
+@using System.Diagnostics
+
+<PageTitle>Error — McServerMgmnt</PageTitle>
+
+<div class="page-head">
+    <span class="eyebrow">Error</span>
+    <h1>Something went wrong handling that request</h1>
+    <p>Try again. If it keeps happening, check the application log for the request ID below.</p>
+</div>
+
+<div class="page-body">
+    <div class="stack" style="max-width: 44rem;">
+        @if (ShowRequestId)
+        {
+            <div class="slot">
+                <dl class="readout">
+                    <div class="readout-cell">
+                        <dt>Request ID</dt>
+                        <dd style="font-size: 0.95rem;" class="mono">@RequestId</dd>
+                    </div>
+                </dl>
+            </div>
+        }
+
+        <a class="btn" href="/">Back to the console</a>
+    </div>
+</div>
+
+@code {
+    [CascadingParameter] private HttpContext? HttpContext { get; set; }
+
+    private string? RequestId { get; set; }
+    private bool ShowRequestId => !string.IsNullOrEmpty(RequestId);
+
+    protected override void OnInitialized() =>
+        RequestId = Activity.Current?.Id ?? HttpContext?.TraceIdentifier;
+}

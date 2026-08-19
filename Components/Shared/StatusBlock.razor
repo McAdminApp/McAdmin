@@ -1,0 +1,16 @@
+@* The signature mark: an isometric block whose colour is the server state. *@
+
+<div class="block @CssClass" data-state="@State" role="img" aria-label="@Label">
+    <span class="block-face block-top"></span>
+    <span class="block-face block-left"></span>
+    <span class="block-face block-right"></span>
+</div>
+
+@code {
+    /// <summary>running | stopped | pending | error</summary>
+    [Parameter] public string State { get; set; } = "stopped";
+
+    [Parameter] public string Label { get; set; } = "Server status";
+
+    [Parameter] public string? CssClass { get; set; }
+}

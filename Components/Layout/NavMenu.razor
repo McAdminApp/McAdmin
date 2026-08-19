@@ -1,0 +1,51 @@
+<nav class="sidebar">
+    <div class="brand">
+        <StatusBlock State="running" CssClass="block--mark" Label="McServerMgmnt"/>
+        <a class="brand-name" href="/">
+            McServerMgmnt
+            <span class="brand-sub">Server console</span>
+        </a>
+    </div>
+
+    <input class="sidebar-toggle" type="checkbox" id="sidebar-toggle" aria-label="Show navigation"/>
+
+    <div class="nav">
+        <NavLink class="nav-link" href="/" Match="NavLinkMatch.All">
+            <span class="nav-glyph glyph-console" aria-hidden="true"></span> Console
+        </NavLink>
+
+        <NavLink class="nav-link" href="/settings">
+            <span class="nav-glyph glyph-settings" aria-hidden="true"></span> Server settings
+        </NavLink>
+
+        <NavLink class="nav-link" href="/account">
+            <span class="nav-glyph glyph-account" aria-hidden="true"></span> Your account
+        </NavLink>
+
+        <AuthorizeView Roles="@UserRoles.Administrator">
+            <div class="nav-section eyebrow">Administration</div>
+            <NavLink class="nav-link" href="/users">
+                <span class="nav-glyph glyph-users" aria-hidden="true"></span> Accounts
+            </NavLink>
+        </AuthorizeView>
+    </div>
+
+    <AuthorizeView>
+        <div class="sidebar-foot">
+            <span class="avatar" aria-hidden="true">@Initial(context.User.Identity?.Name)</span>
+            <span class="sidebar-identity">
+                <strong>@context.User.Identity?.Name</strong>
+                <span class="eyebrow">@(context.User.IsInRole(UserRoles.Administrator) ? "Administrator" : "User")</span>
+            </span>
+            <form method="post" action="/account/logout">
+                <AntiforgeryToken/>
+                <button type="submit" class="btn btn--link btn--small">Sign out</button>
+            </form>
+        </div>
+    </AuthorizeView>
+</nav>
+
+@code {
+    private static string Initial(string? name) =>
+        string.IsNullOrEmpty(name) ? "?" : name[..1];
+}
