@@ -17,6 +17,11 @@ services:
       - ASPNETCORE_ENVIRONMENT=Production
       - ConnectionStrings__AccountsDb=Data Source=/app/data/mcservermgmnt.db
     restart: unless-stopped
+    group_add:
+      - "9001"
+    #
+    # Sätt INTE user: här. /app/data och DataProtection-katalogen ägs av 1654 i imagen,
+    # så en annan uid tappar både databasen och inloggningsnycklarna.
     # Attach to the network the Minecraft server / reverse proxy lives on.
     # networks:
     #   - proxy

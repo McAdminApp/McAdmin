@@ -42,6 +42,35 @@ kontot är flaggat så att UI:t kräver ett nytt lösenord direkt.
 Utan mount rapporterar sidan `IsConnected = false` och visar sin banner i stället för
 att spara.
 
+### Skrivrätt på server.properties
+
+Containern kör som uid 1654 (`app`) medan filen ägs av Minecraft-användaren, så en
+ren mount ger `Access to the path '/app/server.properties' is denied.` när du sparar.
+Läsning fungerar, vilket gör att sidan ser helt frisk ut tills första sparningen.
+
+Gör filen gruppskrivbar och låt containern gå med i samma grupp:
+
+```sh
+stat -c '%U %G %u %g %a' /opt/minecraft/server.properties   # t.ex. minecraft minecraft 1000 1000 644
+sudo chmod g+w /opt/minecraft/server.properties
+```
+
+och i `docker-compose.yml`:
+
+```yaml
+group_add:
+  - "1000"   # gid från stat ovan
+```
+
+Ägaren är kvar som Minecraft-användaren, så servern kan fortsätta skriva sin egen fil.
+
+Sätt **inte** `user:` för att lösa det. `/app/data` och DataProtection-katalogen ägs av
+1654 i imagen; med en annan uid startar appen inte alls utan dör på
+`SQLite Error 14: 'unable to open database file'`.
+
+Om Minecraft-servern någon gång tar bort och återskapar `server.properties` återgår
+rättigheterna till 644 och sparningen börjar neka igen — kör `chmod g+w` på nytt.
+
 ## Bakom reverse proxy
 
 Blazor Server kräver WebSockets — proxya `Upgrade`/`Connection`-headers vidare.
