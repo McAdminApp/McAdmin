@@ -5,7 +5,7 @@ services:
     container_name: mcservermgmnt
     ports:
       # host:container — change the host port if 5679 is taken on the server.
-      - "5679:8080"
+      - "5700:8080"
     volumes:
       # SQLite account database.
       - mcservermgmnt_data:/app/data
