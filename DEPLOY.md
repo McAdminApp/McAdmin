@@ -18,7 +18,7 @@ två volymer; själva imagen är utbytbar.
 docker compose up -d --build
 ```
 
-Appen svarar på <http://localhost:5679>. Första inloggningen är `admin` / `admin`;
+Appen svarar på <http://localhost:5700>. Första inloggningen är `admin` / `admin`;
 kontot är flaggat så att UI:t kräver ett nytt lösenord direkt.
 
 ## Vad som måste ligga på volym
@@ -58,4 +58,21 @@ volymnamnen prefixas med katalognamnet. Imagen taggas både `:${BUILD_NUMBER}` o
 det Jenkins redan byggt.
 
 Byt `APP_PORT` i `Jenkinsfile` och portmappningen i `docker-compose.yml` samtidigt om
-5679 är upptagen.
+5700 är upptagen.
+
+## Fallgrop: `--no-restore` i byggsteget
+
+Publicera **inte** med `--no-restore` i Dockerfilen. Restore-steget körs mot enbart
+`.csproj`, innan Razor-komponenterna och `wwwroot` finns i kontexten, och en
+`--no-restore`-publicering ovanpå det tar inte med ramverkets statiska webbresurser:
+`wwwroot/_framework/blazor.web.js` hamnar aldrig i publiceringen. Appen startar och
+sidorna renderas, men de renderas statiskt — inget interaktivt fungerar, eftersom
+skriptet som startar Blazor-kretsen ger 404.
+
+Snabb kontroll efter en deploy:
+
+```sh
+curl -s -o /dev/null -w '%{http_code}' http://localhost:5700/_framework/blazor.web.js; echo
+```
+
+Svaret ska vara `200`. Blir det `404` är det den här fallgropen igen.

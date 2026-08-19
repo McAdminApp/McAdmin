@@ -4,7 +4,7 @@ services:
     image: mcservermgmnt:latest
     container_name: mcservermgmnt
     ports:
-      # host:container — change the host port if 5679 is taken on the server.
+      # host:container — ändra värdporten om den krockar med något annat på servern.
       - "5700:8080"
     volumes:
       # SQLite account database.

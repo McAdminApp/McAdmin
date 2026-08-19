@@ -5,7 +5,12 @@ COPY McServerMgmnt.csproj .
 RUN dotnet restore
 
 COPY . .
-RUN dotnet publish -c Release -o /app/publish --no-restore
+# Note: no --no-restore here. The restore above runs against the bare .csproj, before
+# any Razor components or wwwroot exist, and a --no-restore publish on top of it drops
+# the framework's static web assets — wwwroot/_framework/blazor.web.js never gets
+# published, so every page renders static and nothing interactive works. The restore
+# layer above still caches the package download.
+RUN dotnet publish -c Release -o /app/publish
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
 WORKDIR /app
