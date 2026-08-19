@@ -1,0 +1,30 @@
+services:
+  web:
+    build: .
+    image: mcservermgmnt:latest
+    container_name: mcservermgmnt
+    ports:
+      # host:container — change the host port if 5679 is taken on the server.
+      - "5679:8080"
+    volumes:
+      # SQLite account database.
+      - mcservermgmnt_data:/app/data
+      # DataProtection keys. Without this volume every redeploy invalidates all
+      # login cookies and antiforgery tokens, and Blazor circuits fail to reconnect.
+      - mcservermgmnt_keys:/home/app/.aspnet/DataProtection-Keys
+      - /opt/minecraft/server.properties:/app/server.properties
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ConnectionStrings__AccountsDb=Data Source=/app/data/mcservermgmnt.db
+    restart: unless-stopped
+    # Attach to the network the Minecraft server / reverse proxy lives on.
+    # networks:
+    #   - proxy
+
+volumes:
+  mcservermgmnt_data:
+  mcservermgmnt_keys:
+
+# networks:
+#   proxy:
+#     external: true
