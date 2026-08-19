@@ -120,7 +120,7 @@
                                 <tr>
                                     <td><strong>@player.Name</strong></td>
                                     <td class="mono">@FormatUptime(player.SessionLength)</td>
-                                    <td class="mono">@player.Ping ms</td>
+                                    <td class="mono">@(player.Ping is { } ping ? $"{ping} ms" : "—")</td>
                                 </tr>
                             }
                             </tbody>

@@ -20,7 +20,11 @@ public record ServerSnapshot(
     string Address,
     string? StatusDetail = null);
 
-public record OnlinePlayer(string Name, TimeSpan SessionLength, int Ping);
+/// <summary>
+/// One player currently online. Ping is nullable because it is not always knowable —
+/// RCON, for one, has no way to ask for latency.
+/// </summary>
+public record OnlinePlayer(string Name, TimeSpan SessionLength, int? Ping);
 
 public record ConsoleLine(DateTimeOffset Timestamp, string Level, string Text);
 

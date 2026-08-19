@@ -12,24 +12,45 @@ services:
       # DataProtection keys. Without this volume every redeploy invalidates all
       # login cookies and antiforgery tokens, and Blazor circuits fail to reconnect.
       - mcservermgmnt_keys:/home/app/.aspnet/DataProtection-Keys
+      # Inställningssidan läser och skriver den här filen.
       - /opt/minecraft/server.properties:/app/server.properties
+      # Serverkatalogen, läsbar, för konsolloggen. RCON returnerar bara svar på kommandon
+      # och aldrig serverns egen utskrift, så loggpanelen kommer härifrån.
+      - /opt/minecraft:/srv/minecraft:ro
+      # RCON kan stoppa servern men aldrig starta en som ligger nere — då finns ingen
+      # lyssnare kvar. Start och omstart går därför via Docker-socketen.
+      - /var/run/docker.sock:/var/run/docker.sock
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
       - ConnectionStrings__AccountsDb=Data Source=/app/data/mcservermgmnt.db
+      # Minecraft-servern. Host är containernamnet om båda ligger på samma nätverk.
+      - McServer__Host=mcserver
+      - McServer__RconPort=25575
+      - McServer__RconPassword=${MC_RCON_PASSWORD}
+      - McServer__ContainerName=mcserver
+      - McServer__LogPath=/srv/minecraft/logs/latest.log
     restart: unless-stopped
+    # Containern kör som uid 1654 (app) och behöver två grupper: Minecraft-serverns, för
+    # att få skriva server.properties, och docker-gruppen, för att nå socketen.
+    #   stat -c '%g' /opt/minecraft/server.properties   # och: sudo chmod g+w på filen
+    #   stat -c '%g' /var/run/docker.sock
     group_add:
-      - "9001"
+      - "9001"   # gid för minecraft
+      - "989"    # gid för docker
     #
     # Sätt INTE user: här. /app/data och DataProtection-katalogen ägs av 1654 i imagen,
     # så en annan uid tappar både databasen och inloggningsnycklarna.
-    # Attach to the network the Minecraft server / reverse proxy lives on.
-    # networks:
-    #   - proxy
+
+    # Samma nätverk som Minecraft-containern, annars går RCON inte att nå.
+    # Skapa det en gång på servern: docker network create mcnet
+    networks:
+      - mcnet
 
 volumes:
   mcservermgmnt_data:
   mcservermgmnt_keys:
 
-# networks:
-#   proxy:
-#     external: true
+networks:
+  # Ägs av ingen av stackarna — skapad för hand så båda kan gå med i den.
+  mcnet:
+    external: true

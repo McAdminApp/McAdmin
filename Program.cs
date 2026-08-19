@@ -2,10 +2,12 @@ using McServerMgmnt.Components;
 using McServerMgmnt.Data;
 using McServerMgmnt.Services;
 using McServerMgmnt.Services.Factories;
+using McServerMgmnt.Services.Rcon;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -20,10 +22,18 @@ builder.Services.AddDbContextFactory<AppDbContext>(options =>
 
 builder.Services.AddScoped<UserService>();
 
-// Server management. Swap PlaceholderServerController for the real gRPC-backed
-// implementation once it exists; the console page talks only to the interface.
-builder.Services.AddSingleton<IMinecraftServerController, PlaceholderServerController>();
+// Server management.
+builder.Services.Configure<RconOptions>(builder.Configuration.GetSection(RconOptions.SectionName));
 builder.Services.AddSingleton<IServerSettingsStore, ServerSettingsStore>();
+builder.Services.AddSingleton<ServerLogReader>();
+
+// RCON needs a host and a password before it can drive anything. Without them the
+// placeholder stays in place, so a checkout with no server behind it still runs and the
+// console page says as much instead of failing to connect on every render.
+builder.Services.AddSingleton<IMinecraftServerController>(sp =>
+    sp.GetRequiredService<IOptions<RconOptions>>().Value.IsConfigured
+        ? ActivatorUtilities.CreateInstance<RconServerController>(sp)
+        : new PlaceholderServerController());
 
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(options =>

@@ -35,7 +35,13 @@ pipeline {
         stage('Deploy') {
             agent { label 'deb-slave01' }
             steps {
-                sh 'docker compose up -d --force-recreate'
+                // RCON-losenordet ligger i Jenkins credentials och skickas in till
+                // docker compose, som satter det som McServer__RconPassword i containern.
+                withCredentials([
+                    string(credentialsId: 'mcservermgmnt-rcon-password', variable: 'MC_RCON_PASSWORD')
+                ]) {
+                    sh 'docker compose up -d --force-recreate'
+                }
             }
         }
 
