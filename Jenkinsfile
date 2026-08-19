@@ -3,7 +3,7 @@ pipeline {
 
     environment {
         IMAGE_NAME = 'mcservermgmnt'
-        APP_PORT   = '5679'
+        APP_PORT   = '5700'
     }
 
     options {
