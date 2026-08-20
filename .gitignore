@@ -63,5 +63,9 @@ nunit-*.xml
 *.user
 whitelist.json
 server.properties
-plugins/
-addons/
+# Local runtime folders for running the app straight from the source tree. Anchored to
+# the exact paths on purpose: an unanchored "plugins/" also matches source folders named
+# Plugins/ (git is case-insensitive on Windows), which silently kept
+# Web/src/Services/Plugins/ out of every commit and broke the Jenkins build.
+/Web/src/plugins/
+/Web/src/addons/
