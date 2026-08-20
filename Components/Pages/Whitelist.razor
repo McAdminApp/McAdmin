@@ -1,0 +1,351 @@
+@page "/whitelist"
+@attribute [Authorize]
+@rendermode InteractiveServer
+
+@inject IServerWhitelist WhitelistStore
+
+<PageTitle>Whitelist — McServerMgmnt</PageTitle>
+
+<div class="page-head">
+    <span class="eyebrow">Server</span>
+    <h1>Server whitelist</h1>
+    <p>The contents of <span class="mono">whitelist.json</span>. Add or remove players, then save — nothing is written until you do.</p>
+</div>
+
+<div class="page-body">
+    <div class="stack">
+
+        @if (!loading && !WhitelistStore.IsConnected)
+        {
+            <div class="notice notice--warn">
+                <span>
+                    <strong>No whitelist file is wired up yet.</strong> Nothing is listed until one is found.
+                    Implement <span class="mono">IServerWhitelist</span> in
+                    <span class="mono">Services/Factories/ServerWhitelistStore.cs</span> — this table reads and
+                    writes everything through that interface.
+                </span>
+            </div>
+        }
+
+        @if (error is not null)
+        {
+            <div class="notice notice--error" role="alert"><span>@error</span></div>
+        }
+        @if (message is not null)
+        {
+            <div class="notice notice--good" role="status"><span>@message</span></div>
+        }
+
+        <section class="slot">
+            <div class="slot-head">
+                <h2>Whitelist</h2>
+                <input type="search" placeholder="Filter players" @bind="filter" @bind:event="oninput"
+                       aria-label="Filter players" style="width: 14rem;"/>
+            </div>
+
+            @if (loading)
+            {
+                <div class="empty">Reading the whitelist…</div>
+            }
+            else if (Rows.Count == 0)
+            {
+                <div class="empty">
+                    <h3>Nobody is whitelisted</h3>
+                    <p class="muted" style="margin: 0;">Add a player below — they can join as soon as you save.</p>
+                </div>
+            }
+            else if (Visible.Count == 0)
+            {
+                <div class="empty">
+                    <h3>No player matches “@filter”</h3>
+                    <p class="muted" style="margin: 0;">Try the UUID instead, or part of it.</p>
+                </div>
+            }
+            else
+            {
+                <div class="table-scroll">
+                    <table class="table table--settings">
+                        <thead>
+                        <tr>
+                            <th>Player</th>
+                            <th>ID</th>
+                            <th></th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        @foreach (var row in Visible)
+                        {
+                            var changed = row.IsAdded || row.IsRemoved;
+
+                            <tr data-changed="@ChangedMarker(changed)">
+                                <td>
+                                    <strong>@row.Name</strong>
+                                    @if (row.IsAdded)
+                                    {
+                                        <span class="setting-help">Added on the next save.</span>
+                                    }
+                                    else if (row.IsRemoved)
+                                    {
+                                        <span class="setting-help">Removed on the next save.</span>
+                                    }
+                                </td>
+                                <td class="mono muted">
+                                    @if (string.IsNullOrWhiteSpace(row.Id))
+                                    {
+                                        <span title="This entry has no UUID">—</span>
+                                    }
+                                    else
+                                    {
+                                        @FormatId(row.Id)
+                                    }
+                                </td>
+                                <td>
+                                    <div class="row-actions">
+                                        @if (row.IsAdded)
+                                        {
+                                            <span class="tag">Pending add</span>
+                                            <button class="btn btn--small btn--link" @onclick="() => CancelAdd(row.Name)">Undo</button>
+                                        }
+                                        else if (row.IsRemoved)
+                                        {
+                                            <span class="tag tag--admin">Pending removal</span>
+                                            <button class="btn btn--small btn--link" @onclick="() => CancelRemove(row.Name)">Undo</button>
+                                        }
+                                        else
+                                        {
+                                            <button class="btn btn--small btn--danger" @onclick="() => Remove(row.Name)" disabled="@busy">Remove</button>
+                                        }
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                </div>
+            }
+
+            <div class="slot-body">
+                <div style="display: flex; gap: 0.6rem; align-items: flex-end; flex-wrap: wrap;">
+                    <div class="field" style="margin: 0; width: 18rem;">
+                        <label for="new-player">Add a player</label>
+                        <input id="new-player" type="text" autocomplete="off" placeholder="Player name"
+                               @bind="newPlayerName" @bind:event="oninput" @onkeydown="OnAddKeyDown"
+                               disabled="@looking"/>
+                        <span class="hint">The name they log in with. The UUID is looked up as you add them.</span>
+                    </div>
+                    <button class="btn btn--small btn--primary" style="margin-bottom: 1.4rem;"
+                            @onclick="AddAsync" disabled="@(busy || looking || string.IsNullOrWhiteSpace(newPlayerName))">
+                        @(looking ? "Looking up…" : "Add to list")
+                    </button>
+                </div>
+            </div>
+
+            <div class="command-bar">
+                <span class="muted" style="flex: 1;">
+                    @(PendingCount switch
+                    {
+                        0 => "No unsaved changes.",
+                        1 => "1 unsaved change.",
+                        _ => $"{PendingCount} unsaved changes."
+                    })
+                </span>
+                <button class="btn btn--small" @onclick="DiscardAll" disabled="@(busy || PendingCount == 0)">Discard changes</button>
+                <button class="btn btn--small btn--primary" @onclick="SaveAsync" disabled="@(busy || PendingCount == 0)">Save changes</button>
+            </div>
+        </section>
+    </div>
+</div>
+
+@code {
+    private IReadOnlyList<Player> whitelist = [];
+
+    /// <summary>Players staged to be added, already resolved to a real name and UUID. Cleared on save or discard.</summary>
+    private readonly List<Player> additions = [];
+
+    /// <summary>Names of whitelisted players staged to be removed.</summary>
+    private readonly HashSet<string> removals = new(StringComparer.OrdinalIgnoreCase);
+
+    private string filter = string.Empty;
+    private string newPlayerName = string.Empty;
+    private string? error;
+    private string? message;
+    private bool busy;
+    private bool looking;
+    private bool loading = true;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+
+        try
+        {
+            whitelist = await WhitelistStore.GetWhitelistAsync();
+        }
+        catch (Exception ex)
+        {
+            whitelist = [];
+            error = ex.Message;
+        }
+        finally
+        {
+            loading = false;
+        }
+
+        additions.Clear();
+        removals.Clear();
+    }
+
+    /// <summary>One line of the table: a stored player, or one staged to be added.</summary>
+    private sealed record Row(string Name, string? Id, bool IsAdded, bool IsRemoved);
+
+    private List<Row> Rows =>
+        whitelist
+            .Select(p => new Row(p.Name ?? string.Empty, p.Id, false, removals.Contains(p.Name ?? string.Empty)))
+            .Concat(additions.Select(p => new Row(p.Name, p.Id, true, false)))
+            .OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    private List<Row> Visible =>
+        string.IsNullOrWhiteSpace(filter)
+            ? Rows
+            : Rows.Where(r =>
+                r.Name.Contains(filter, StringComparison.OrdinalIgnoreCase)
+                || (r.Id?.Contains(filter, StringComparison.OrdinalIgnoreCase) ?? false)).ToList();
+
+    private int PendingCount => additions.Count + removals.Count;
+
+    private static string? ChangedMarker(bool changed) => changed ? "yes" : null;
+
+    /// <summary>Mojang answers with an undashed UUID, whitelist.json carries dashes. Show both the same way.</summary>
+    private static string FormatId(string id) =>
+        id.Length == 32 && !id.Contains('-')
+            ? $"{id[..8]}-{id[8..12]}-{id[12..16]}-{id[16..20]}-{id[20..]}"
+            : id;
+
+    private async Task AddAsync()
+    {
+        var name = newPlayerName.Trim();
+        message = null;
+        error = null;
+
+        if (name.Length == 0)
+        {
+            return;
+        }
+
+        // Adding back someone staged for removal is not a change, it just cancels the removal.
+        if (removals.Remove(name))
+        {
+            newPlayerName = string.Empty;
+            return;
+        }
+
+        if (IsListed(name))
+        {
+            error = $"{name} is already on the whitelist.";
+            return;
+        }
+
+        looking = true;
+
+        try
+        {
+            var player = await WhitelistStore.GetPlayer(name);
+
+            // The lookup answers with the account's own spelling, which may differ from what was typed.
+            if (IsListed(player.Name)
+                || additions.Any(a => string.Equals(a.Id, player.Id, StringComparison.OrdinalIgnoreCase)))
+            {
+                error = $"{player.Name} is already on the whitelist.";
+                return;
+            }
+
+            additions.Add(player);
+            newPlayerName = string.Empty;
+        }
+        catch (HttpRequestException)
+        {
+            error = $"No Minecraft account is named “{name}”.";
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            looking = false;
+        }
+    }
+
+    private bool IsListed(string name) =>
+        whitelist.Any(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase))
+        || additions.Any(a => string.Equals(a.Name, name, StringComparison.OrdinalIgnoreCase));
+
+    private Task OnAddKeyDown(KeyboardEventArgs e) =>
+        e.Key == "Enter" ? AddAsync() : Task.CompletedTask;
+
+    private void Remove(string name)
+    {
+        message = null;
+        removals.Add(name);
+    }
+
+    private void CancelAdd(string name) =>
+        additions.RemoveAll(player => string.Equals(player.Name, name, StringComparison.OrdinalIgnoreCase));
+
+    private void CancelRemove(string name) => removals.Remove(name);
+
+    private void DiscardAll()
+    {
+        additions.Clear();
+        removals.Clear();
+        newPlayerName = string.Empty;
+        message = null;
+        error = null;
+    }
+
+    private async Task SaveAsync()
+    {
+        busy = true;
+        error = null;
+        message = null;
+
+        var added = additions.Count;
+        var removed = removals.Count;
+
+        try
+        {
+            foreach (var player in additions.ToList())
+            {
+                await WhitelistStore.SaveAsync(player);
+            }
+
+            foreach (var name in removals.ToList())
+            {
+                await WhitelistStore.RemoveAsync(name);
+            }
+
+            await LoadAsync();
+            message = Summary(added, removed);
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private static string Summary(int added, int removed) => (added, removed) switch
+    {
+        (0, 1) => "Removed 1 player.",
+        (0, var r) => $"Removed {r} players.",
+        (1, 0) => "Added 1 player.",
+        (var a, 0) => $"Added {a} players.",
+        var (a, r) => $"Added {a} and removed {r} players."
+    };
+}

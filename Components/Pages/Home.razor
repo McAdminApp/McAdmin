@@ -259,9 +259,7 @@
         var lines = log.Count + echo.Count;
 
         if (scroller is null || lines == scrolledAt)
-        {
             return;
-        }
 
         await scroller.InvokeVoidAsync("scrollToBottom", logPanel);
         scrolledAt = lines;

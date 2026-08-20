@@ -57,3 +57,9 @@ TestResult.xml
 nunit-*.xml
 
 .idea/
+*.db
+*.db-shm
+*.db-wal
+*.user
+whitelist.json
+server.properties

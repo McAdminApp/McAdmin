@@ -317,6 +317,7 @@ a:hover {
 .glyph-account { clip-path: circle(50% at 50% 50%); }
 .glyph-users   { clip-path: polygon(0 0, 45% 0, 45% 45%, 0 45%, 0 0, 55% 55%, 100% 55%, 100% 100%, 55% 100%); }
 .glyph-settings{ clip-path: polygon(0 10%, 100% 10%, 100% 35%, 0 35%, 0 65%, 100% 65%, 100% 90%, 0 90%); }
+.glyph-whitelist{ clip-path: polygon(0 48%, 18% 30%, 38% 56%, 82% 4%, 100% 22%, 38% 96%); }
 
 .sidebar-foot {
     border-top: 1px solid var(--edge-line);

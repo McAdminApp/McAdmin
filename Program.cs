@@ -25,6 +25,7 @@ builder.Services.AddScoped<UserService>();
 // Server management.
 builder.Services.Configure<RconOptions>(builder.Configuration.GetSection(RconOptions.SectionName));
 builder.Services.AddSingleton<IServerSettingsStore, ServerSettingsStore>();
+builder.Services.AddSingleton<IServerWhitelist, ServerWhitelistStore>();
 builder.Services.AddSingleton<ServerLogReader>();
 
 // RCON needs a host and a password before it can drive anything. Without them the
