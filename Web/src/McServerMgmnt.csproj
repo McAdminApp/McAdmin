@@ -13,7 +13,7 @@
     </ItemGroup>
 
     <ItemGroup>
-      <ProjectReference Include="..\plugin\McAdminPlugins.csproj" />
+      <ProjectReference Include="..\..\API\src\McAdminPlugins.csproj" />
     </ItemGroup>
 
 </Project>

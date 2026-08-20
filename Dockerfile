@@ -1,10 +1,10 @@
-# Bygg körs med repots rot som kontext. Webbappen har en ProjectReference till
-# plugin-API:t, så båda projekten måste ligga innanför kontexten.
+# The build context is the repository root. The web app has a ProjectReference to the
+# plugin API, so both projects have to sit inside the context.
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
-# Restore mot enbart projektfilerna först, så paketnedladdningen hamnar i ett eget
-# lager och överlever ändringar i källkoden.
+# Restore against the bare project files first, so the package download lands in a layer
+# of its own and survives edits to the source.
 COPY src/McAdminPlugins.sln src/
 COPY src/web/McServerMgmnt.csproj src/web/
 COPY src/plugin/McAdminPlugins.csproj src/plugin/
@@ -19,9 +19,9 @@ COPY src/ src/
 RUN dotnet publish src/web/McServerMgmnt.csproj -c Release -o /app/publish
 
 
-# Plugin-API:t exporteras som lös .dll — plugin-författare laddar ner den och
-# refererar den själva. Den kommer ur publish-utdatan, så det är exakt samma fil som
-# den körande appen laddar och därmed samma kontrakt. Hämta ut den med:
+# The plugin API is exported as a loose .dll — plugin authors download it and reference
+# it themselves. It comes out of the publish output, so it is the exact same file the
+# running app loads, and therefore the same contract. Extract it with:
 #   docker build --target api --output type=local,dest=artifacts .
 FROM scratch AS api
 COPY --from=build /app/publish/McAdminPlugins.dll /
@@ -34,10 +34,10 @@ WORKDIR /app
 # keys that sign auth cookies and antiforgery tokens. Both must survive a redeploy,
 # so mount a volume on each of them (see docker-compose.yml).
 #
-# /app/addons är släppkatalogen för plugin-assemblies byggda mot McAdminPlugins —
-# alltså tillägg till webbappen. Blanda inte ihop den med /app/plugins, som är
-# Minecraft-serverns egen plugins-katalog (bind-mountad i compose) och det är
-# konfigfilerna *där* som ett plugin får redigera.
+# /app/addons is the drop-in folder for plugin assemblies built against McAdminPlugins —
+# extensions to the web app. Do not confuse it with /app/plugins, which is the Minecraft
+# server's own plugins folder (bind-mounted in compose); it is the config files *there*
+# that a plugin is allowed to edit.
 RUN mkdir -p /app/data /app/addons /home/app/.aspnet/DataProtection-Keys && \
     chown -R $APP_UID:$APP_UID /app/data /app/addons /home/app/.aspnet
 

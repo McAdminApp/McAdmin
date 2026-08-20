@@ -24,8 +24,8 @@ pipeline {
         stage('Bygg image') {
             agent { label 'deb-slave01' }
             steps {
-                // Kontexten är repots rot, inte src/web — webbprojektet refererar
-                // plugin-projektet och båda måste ligga innanför kontexten.
+                // The context is the repository root, not src/web — the web project
+                // references the plugin project and both must sit inside the context.
                 sh '''
                     docker build -f Dockerfile \
                         -t ${IMAGE_NAME}:${BUILD_NUMBER} \
@@ -34,13 +34,13 @@ pipeline {
             }
         }
 
-        stage('Exportera plugin-API') {
+        stage('Export plugin API') {
             agent { label 'deb-slave01' }
             steps {
-                // McAdminPlugins.dll plockas ut ur image-bygget och arkiveras, så att
-                // plugin-författare kan ladda ner den från bygget och referera den i
-                // sitt eget projekt. Lagren är redan cachade från föregående stage, och
-                // Jenkins-noden behöver inget .NET SDK installerat.
+                // McAdminPlugins.dll is pulled out of the image build and archived, so
+                // plugin authors can download it from the build and reference it in
+                // their own project. The layers are already cached from the previous
+                // stage, and the Jenkins node needs no .NET SDK installed.
                 sh '''
                     rm -rf artifacts
                     DOCKER_BUILDKIT=1 docker build -f Dockerfile \
@@ -59,10 +59,11 @@ pipeline {
                 withCredentials([
                     string(credentialsId: 'mcservermgmnt-rcon-password', variable: 'MC_RCON_PASSWORD')
                 ]) {
-                    // docker-compose.yml ligger kvar i repots rot. Compose härleder
-                    // projektnamnet ur katalogen filen står i, och projektnamnet är det
-                    // som prefixar volymerna mcservermgmnt_data och _keys. Flyttas filen
-                    // ner i src/web tappar deployen både databasen och auth-nycklarna.
+                    // docker-compose.yml stays in the repository root. Compose derives
+                    // the project name from the directory the file sits in, and that
+                    // name prefixes the mcservermgmnt_data and _keys volumes. Move the
+                    // file down into src/web and the deploy loses both the database and
+                    // the auth keys.
                     sh 'docker compose up -d --force-recreate'
                 }
             }

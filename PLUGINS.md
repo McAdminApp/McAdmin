@@ -1,24 +1,27 @@
 # Plugins
 
-McAdmin läser in plugins från en katalog vid uppstart. Ett plugin är en vanlig .NET-
-assembly som bygger mot `McAdminPlugins` och kan göra två saker:
+McAdmin loads plugins from a folder at startup. A plugin is an ordinary .NET assembly
+built against `McAdminPlugins`, and it can do two things:
 
-* lägga till sidor i navigationsmenyn, och
-* läsa och skriva konfigfiler i Minecraft-serverns egen plugins-katalog.
+* add pages to the navigation menu, and
+* read and write config files in the Minecraft server's own plugins folder.
 
-| Projekt      | Roll |
+| Project      | Role |
 |--------------|------|
-| `src/plugin` | `McAdminPlugins` — kontraktet plugin-författare bygger mot. Packas som NuGet av Jenkins. |
-| `src/web`    | Webbappen. `Services/Plugins/` innehåller laddaren och implementationerna. |
+| `src/plugin` | `McAdminPlugins` — the contract plugin authors build against. Distributed as a loose `.dll`. |
+| `src/web`    | The web app. `Services/Plugins/` holds the loader and the implementations. |
 
 ---
 
-## Skriva ett plugin
+## Writing a plugin
 
-### 1. Skapa projektet
+### 1. Create the project
 
-Ett plugin som bara rör konfigfiler kan vara ett `Microsoft.NET.Sdk`-projekt. Ska det
-ha sidor behövs `Microsoft.NET.Sdk.Razor`:
+Get `McAdminPlugins.dll` — it is archived as an artifact on the Jenkins build — and put
+it somewhere in your project, for example a `lib/` folder.
+
+A plugin that only touches config files can be a plain `Microsoft.NET.Sdk` project. One
+that adds pages needs `Microsoft.NET.Sdk.Razor`:
 
 ```xml
 <Project Sdk="Microsoft.NET.Sdk.Razor">
@@ -28,18 +31,28 @@ ha sidor behövs `Microsoft.NET.Sdk.Razor`:
         <ImplicitUsings>enable</ImplicitUsings>
     </PropertyGroup>
     <ItemGroup>
-        <PackageReference Include="McAdminPlugins" Version="1.0.0" />
+        <Reference Include="McAdminPlugins">
+            <HintPath>lib\McAdminPlugins.dll</HintPath>
+            <!-- The host already has its own copy and always loads that one.
+                 Private=false keeps it out of your bin/ so you don't ship a duplicate. -->
+            <Private>false</Private>
+        </Reference>
     </ItemGroup>
 </Project>
 ```
 
-`.nupkg`-filen ligger som artefakt på Jenkins-bygget. Under utveckling går det lika bra
-med en `<ProjectReference Include="..\..\mcmngmt\src\plugin\McAdminPlugins.csproj" />`.
+If it ends up in `bin/` anyway that is harmless — the host skips the copy. With the
+source next to you, pointing straight at the project works just as well during
+development: `<ProjectReference Include="..\..\mcmngmt\src\plugin\McAdminPlugins.csproj" />`.
 
-### 2. Implementera `IPlugin`
+Use a `McAdminPlugins.dll` from the same build as the app you are targeting. The
+contract carries no version of its own, so an outdated .dll against a newer app is not
+caught until load time.
 
-Värden hittar klassen genom att skanna assemblyn, bygger den, och inväntar `Load()`
-en gång under uppstart. Allt pluginen behöver begärs i konstruktorn:
+### 2. Implement `IPlugin`
+
+The host finds the class by scanning the assembly, constructs it, and awaits `Load()`
+once during startup. Everything a plugin needs is requested through its constructor:
 
 ```csharp
 using McAdminPlugins;
@@ -55,7 +68,7 @@ public sealed class MyPlugin(IPluginNavigation nav, IServerPluginFiles files) : 
         Files = files;
 
         nav.AddPage("Essentials", "/essentials", order: 10);
-        nav.AddPage(new PluginNavItem("Rensa cache", "/essentials/admin",
+        nav.AddPage(new PluginNavItem("Clear cache", "/essentials/admin",
             AdministratorOnly: true, Order: 20));
 
         return Task.CompletedTask;
@@ -63,23 +76,24 @@ public sealed class MyPlugin(IPluginNavigation nav, IServerPluginFiles files) : 
 }
 ```
 
-Konstruktorn går genom värdens DI-container, så vilken registrerad tjänst som helst går
-att be om — till exempel `ILogger<MyPlugin>`. Instansen lever hela appens livstid och
-får därför inte hålla i något scoped; sidor som behöver det injicerar själva.
+The constructor goes through the host's DI container, so you can ask for any registered
+service — `ILogger<MyPlugin>`, for instance. The instance lives for the lifetime of the
+app and must therefore not hold on to anything scoped; pages that need scoped services
+inject them themselves.
 
-### 3. Lägg till en sida
+### 3. Add a page
 
-En helt vanlig Razor-komponent med `@page`. Routen måste matcha det `Href` du
-registrerade:
+An ordinary Razor component with `@page`. The route has to match the `Href` you
+registered:
 
 ```razor
 @page "/essentials"
 @rendermode InteractiveServer
 
 <h1>Essentials</h1>
-<p>Kopplad: @(MyPlugin.Files?.IsConnected)</p>
+<p>Connected: @(MyPlugin.Files?.IsConnected)</p>
 
-<button class="btn" @onclick="Save">Spara</button>
+<button class="btn" @onclick="Save">Save</button>
 
 @code {
     private async Task Save()
@@ -91,35 +105,37 @@ registrerade:
 }
 ```
 
-Sidan får värdens `MainLayout` och dess CSS-klasser automatiskt. Lägg
-`@attribute [Authorize]` på den om den inte ska vara öppen för oinloggade — routen är
-öppen tills du säger något annat, precis som appens egna sidor.
+The page gets the host's `MainLayout` and its CSS classes automatically. Add
+`@attribute [Authorize]` if it should not be open to signed-out visitors — the route is
+open until you say otherwise, exactly like the app's own pages.
 
-### 4. Bygg och lägg på plats
+### 4. Build and drop it in
 
 ```sh
 dotnet build -c Release
 ```
 
-Kopiera innehållet i `bin/Release/net10.0/` till en egen underkatalog i drop-in-mappen:
+Copy the contents of `bin/Release/net10.0/` into a folder of its own inside the drop-in
+directory:
 
 ```
 addons/
   MyPlugin/
     MyPlugin.dll
-    McAdminPlugins.dll        # ofarlig, värden hoppar över den
-  EttAnnatPlugin/
-    EttAnnatPlugin.dll
+    McAdminPlugins.dll        # harmless, the host skips it
+  AnotherPlugin/
+    AnotherPlugin.dll
 ```
 
-Lösa `.dll`-filer direkt i `addons/` fungerar också, men en katalog per plugin är bättre
-så fort ett plugin har egna beroenden — de probas bara i sin egen mapp.
+Loose `.dll` files directly in `addons/` work too, but one folder per plugin is better
+as soon as a plugin has dependencies of its own — those are only probed for in the
+plugin's own folder.
 
-Starta om appen. Plugins läses in vid uppstart och aldrig därefter.
+Restart the app. Plugins are read at startup and never again.
 
 ---
 
-## API:t
+## The API
 
 ### `IPlugin`
 
@@ -127,8 +143,8 @@ Starta om appen. Plugins läses in vid uppstart och aldrig därefter.
 Task Load();
 ```
 
-Anropas en gång, innan appen tar emot sin första request. Registrera navigation här. Ett
-plugin som kastar hoppas över och loggas — resten av appen startar ändå.
+Called once, before the app takes its first request. Register navigation here. A plugin
+that throws is skipped and logged; the rest of the app starts anyway.
 
 ### `IPluginNavigation`
 
@@ -138,17 +154,18 @@ void AddPage(string text, string href, string? glyph = null,
              bool administratorOnly = false, int order = 0);
 ```
 
-Entries hamnar under rubriken "Plugins" i sidomenyn, sorterade på `Order` och därefter
-alfabetiskt. `AdministratorOnly` döljer posten för alla utom administratörer — det är en
-UI-filtrering, så skydda även själva sidan med `@attribute [Authorize(Roles = ...)]`.
+Entries land under a "Plugins" heading in the sidebar, sorted by `Order` and then
+alphabetically. `AdministratorOnly` hides the entry from everyone but administrators —
+that is a UI filter, so protect the page itself with
+`@attribute [Authorize(Roles = ...)]` as well.
 
-`Glyph` är en av `glyph-*`-klasserna i `app.css`; utelämnad ger den generiska
-plugin-ikonen.
+`Glyph` is one of the `glyph-*` classes in `app.css`; leaving it out gives the generic
+plugin icon.
 
 ### `IServerPluginFiles`
 
-Läs- och skrivåtkomst till Minecraft-serverns plugins-katalog — alltså där EssentialsX,
-LuckPerms och andra har sina `config.yml`.
+Read and write access to the Minecraft server's plugins folder — where EssentialsX,
+LuckPerms and the rest keep their `config.yml`.
 
 ```csharp
 bool IsConnected { get; }
@@ -159,105 +176,104 @@ Task<string> ReadTextAsync(string relativePath, CancellationToken ct = default);
 Task WriteTextAsync(string relativePath, string contents, CancellationToken ct = default);
 ```
 
-Alla vägar är relativa till plugins-katalogen. Vägar som pekar ut ur den — `..` eller en
-absolut väg — avvisas med `UnauthorizedAccessException`. Kolla `IsConnected` innan du
-gör något: är katalogen inte mountad kastar övriga anrop.
+Every path is relative to the plugins folder. Paths that point out of it — `..` or an
+absolute path — are refused with `UnauthorizedAccessException`. Check `IsConnected`
+before doing anything: if the folder is not mounted, the other calls throw.
 
-Det är text in och text ut med flit. Konfigformaten skiljer sig åt mellan Minecraft-
-plugins, så YAML- eller JSON-parsning får det plugin sköta som vet vilket format det är.
-Servern läser dessutom det mesta bara vid uppstart, så en ändring syns oftast först
-efter en omstart.
+Text in and text out, deliberately. Config formats differ between Minecraft plugins, so
+parsing YAML or JSON is left to the plugin that knows which format it is dealing with.
+The server also reads most of these files only at startup, so a change usually does not
+take effect until it restarts.
 
 ---
 
-## Konfiguration
+## Configuration
 
-Sektionen `Plugins` i `appsettings.json`, eller `Plugins__*` som miljövariabler:
+The `Plugins` section in `appsettings.json`, or `Plugins__*` as environment variables:
 
-| Nyckel              | Standard  | Betyder |
+| Key                 | Default   | Meaning |
 |---------------------|-----------|---------|
-| `Enabled`           | `true`    | `false` startar appen utan att titta i drop-in-katalogen. |
-| `Path`              | `addons`  | Drop-in-katalogen för plugin-assemblies. |
-| `ServerPluginsPath` | `plugins` | Minecraft-serverns plugins-katalog, den `IServerPluginFiles` delar ut. |
+| `Enabled`           | `true`    | `false` starts the app without looking in the drop-in folder at all. |
+| `Path`              | `addons`  | The drop-in folder for plugin assemblies. |
+| `ServerPluginsPath` | `plugins` | The Minecraft server's plugins folder, the one `IServerPluginFiles` hands out. |
 
-Båda vägarna är relativa till arbetskatalogen (`/app` i containern) om de inte är
-absoluta. I `docker-compose.yml` är `/app/plugins` bind-mountad mot serverns riktiga
-plugins-katalog; `/app/addons` finns i imagen och kan mountas för att kunna släppa in
-plugins utan att bygga om.
+Both paths are relative to the working directory (`/app` in the container) unless given
+as absolute paths. In `docker-compose.yml`, `/app/plugins` is bind-mounted against the
+server's real plugins folder; `/app/addons` exists in the image and can be mounted so
+plugins can be dropped in without rebuilding.
 
-De två katalogerna är alltså **inte** samma sak: `addons` är McAdmins egna tillägg,
-`plugins` är Minecraft-serverns.
+The two folders are **not** the same thing: `addons` holds McAdmin's own extensions,
+`plugins` belongs to the Minecraft server.
 
 ---
 
-## Hur det fungerar
+## How it works
 
-Allt ligger i `src/web/Services/Plugins/`.
+Everything lives in `src/web/Services/Plugins/`.
 
-**`PluginLoader`** körs från `Program.cs` direkt efter `DbInitializer`, före första
-requesten, eftersom routingen behöver assembly-listan uppe innan endpoints byggs.
+**`PluginLoader`** runs from `Program.cs` right after `DbInitializer`, before the first
+request, because routing needs the assembly list in place before endpoints are built.
 
-Den går igenom `addons/` plus varje underkatalog och tittar på varje `.dll`:
+It walks `addons/` plus each of its subfolders and looks at every `.dll`:
 
-1. Filer som inte är .NET-assemblies hoppas över (`BadImageFormatException`).
-2. Assemblies vars enkla namn redan finns i processen hoppas över, liksom allt som
-   börjar på `Microsoft.` eller `System.`. Det är den viktiga biten: ett plugins
-   byggutdata innehåller en kopia av `McAdminPlugins.dll`, och laddades den kopian
-   skulle vi få en andra `McAdminPlugins.IPlugin` som ser identisk ut men som inget
-   castar till. Kontraktet ska alltid komma från värden.
-3. Resten laddas med `AssemblyLoadContext.Default.LoadFromAssemblyPath`.
-4. Typer som implementerar `IPlugin` byggs med `ActivatorUtilities.CreateInstance` från
-   rot-providern, och `Load()` inväntas.
-5. Assemblyn läggs i `PluginRegistry`, och en `LoadedPlugin` registreras — även när den
-   misslyckades, så listan går att visa upp.
+1. Files that are not .NET assemblies are skipped (`BadImageFormatException`).
+2. Assemblies whose simple name is already in the process are skipped, as is anything
+   starting with `Microsoft.` or `System.`. This is the part that matters: a plugin's
+   build output contains a copy of `McAdminPlugins.dll`, and loading that copy would
+   give us a second `McAdminPlugins.IPlugin` that looks identical but casts to nothing.
+   The contract must always come from the host.
+3. The rest are loaded with `AssemblyLoadContext.Default.LoadFromAssemblyPath`.
+4. Types implementing `IPlugin` are built with `ActivatorUtilities.CreateInstance` from
+   the root provider, and `Load()` is awaited.
+5. The assembly goes into `PluginRegistry`, and a `LoadedPlugin` is recorded — including
+   for the ones that failed, so the list can be shown.
 
-Varje plugin körs i sin egen try/catch. En trasig `Load()` loggas som `fail:` och
-laddningen fortsätter med nästa.
+Each plugin runs in its own try/catch. A `Load()` that throws is logged as `fail:` and
+loading continues with the next one.
 
-**Default-kontexten, inte en privat.** Det är ett medvetet val. Blazor slår upp en
-komponents assembly på namn när den kopplar upp en interaktiv circuit, och en assembly
-som gömts i en egen `AssemblyLoadContext` hittas inte den vägen — sidan hade renderats
-en gång och sedan aldrig blivit interaktiv. Priset är att plugins varken kan laddas ur
-eller bytas ut medan appen kör: `.dll`-filen är låst av processen, så en uppdatering
-kräver omstart.
+**The default context, not a private one.** This is a deliberate choice. Blazor resolves
+a component's assembly by name when it wires up an interactive circuit, and an assembly
+hidden away in its own `AssemblyLoadContext` cannot be found that way — the page would
+render once and then never become interactive. The price is that plugins can neither be
+unloaded nor replaced while the app is running: the `.dll` is locked by the process, so
+updating one means restarting.
 
-En `Resolving`-hook på default-kontexten probar plugin-katalogerna, så ett plugin som
-tar med sig egna beroenden får dem upplösta ur sin egen mapp.
+A `Resolving` hook on the default context probes the plugin folders, so a plugin that
+brings dependencies of its own gets them resolved out of its own folder.
 
-**`PluginRegistry`** är singleton och håller nav-poster, route-assemblies och
-laddningsresultat. Den implementerar `IPluginNavigation`, vilket är vad pluginen ser.
-Allt skrivs under uppstart och läses bara därefter.
+**`PluginRegistry`** is a singleton holding nav items, route assemblies and load
+results. It implements `IPluginNavigation`, which is what plugins see. Everything is
+written during startup and only read afterwards.
 
-**Routing kräver två registreringar**, som täcker var sin halva av en request:
+**Routing needs two registrations**, covering one half of a request each:
 
 ```csharp
-// Program.cs — endpoints som svarar på första, serverrenderade träffen på URL:en
+// Program.cs — the endpoints that answer the first, server-rendered hit on the URL
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode()
     .AddAdditionalAssemblies(registry.RouteAssemblies.ToArray());
 ```
 
 ```razor
-@* Routes.razor — samma lista, så navigering inifrån en levande circuit hittar rätt *@
+@* Routes.razor — the same list, so navigating there from a live circuit resolves too *@
 <Router AppAssembly="typeof(Program).Assembly"
         AdditionalAssemblies="Plugins.RouteAssemblies" ... />
 ```
 
-Med bara den ena ger plugin-sidan antingen 404 eller en återvändsgränd vid
-klientnavigering.
+With only one of them, a plugin page either 404s or dead-ends on client-side navigation.
 
-**`NavMenu.razor`** läser `PluginRegistry.NavItems` och ritar en "Plugins"-sektion när
-listan inte är tom. Poster med `AdministratorOnly` lindas i `AuthorizeView`.
+**`NavMenu.razor`** reads `PluginRegistry.NavItems` and draws a "Plugins" section when
+the list is not empty. Entries marked `AdministratorOnly` are wrapped in `AuthorizeView`.
 
 ---
 
-## Begränsningar
+## Limitations
 
-* **Ingen hot reload.** Plugins läses in vid uppstart och `.dll`-filen är låst så länge
-  appen kör. Byt plugin, starta om.
-* **`wwwroot` i ett plugin serveras inte.** Statiska tillgångar i ett Razor-bibliotek
-  kopplas in vid byggtid, och ett plugin laddas efteråt. Använd värdens CSS-klasser,
-  eller lägg CSS och JS inline i komponenten.
-* **Plugins kör med full behörighet i appens process.** Det finns ingen sandlåda utöver
-  att `IServerPluginFiles` håller sig innanför plugins-katalogen — ett plugin kan i
-  övrigt göra allt appen kan. Lägg bara in kod du litar på.
+* **No hot reload.** Plugins are read at startup and the `.dll` stays locked for as long
+  as the app runs. Swap a plugin, then restart.
+* **A plugin's `wwwroot` is not served.** Static assets in a Razor class library are
+  wired up at build time, and a plugin is loaded after that. Use the host's CSS classes,
+  or put CSS and JS inline in the component.
+* **Plugins run with full privileges inside the app's process.** There is no sandbox
+  beyond `IServerPluginFiles` staying inside the plugins folder — a plugin can otherwise
+  do anything the app can. Only install code you trust.
