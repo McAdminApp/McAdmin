@@ -63,3 +63,5 @@ nunit-*.xml
 *.user
 whitelist.json
 server.properties
+plugins/
+addons/

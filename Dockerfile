@@ -19,14 +19,12 @@ COPY src/ src/
 RUN dotnet publish src/web/McServerMgmnt.csproj -c Release -o /app/publish
 
 
-# Plugin-API:t paketeras som en NuGet-fil så att plugin-författare kan kompilera mot
-# exakt samma kontrakt som den körande appen laddar. Hämta ut den med:
-#   docker build --target package --output type=local,dest=artifacts .
-FROM build AS pack
-RUN dotnet pack src/plugin/McAdminPlugins.csproj -c Release -o /pack
-
-FROM scratch AS package
-COPY --from=pack /pack/ /
+# Plugin-API:t exporteras som lös .dll — plugin-författare laddar ner den och
+# refererar den själva. Den kommer ur publish-utdatan, så det är exakt samma fil som
+# den körande appen laddar och därmed samma kontrakt. Hämta ut den med:
+#   docker build --target api --output type=local,dest=artifacts .
+FROM scratch AS api
+COPY --from=build /app/publish/McAdminPlugins.dll /
 
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final

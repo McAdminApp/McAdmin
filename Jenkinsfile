@@ -34,19 +34,20 @@ pipeline {
             }
         }
 
-        stage('Paketera plugin-API') {
+        stage('Exportera plugin-API') {
             agent { label 'deb-slave01' }
             steps {
-                // Plugin-API:t packas i samma image-bygge och exporteras som .nupkg,
-                // så Jenkins-noden inte behöver något .NET SDK installerat. Lagren
-                // från föregående stage är redan cachade, så det här går fort.
+                // McAdminPlugins.dll plockas ut ur image-bygget och arkiveras, så att
+                // plugin-författare kan ladda ner den från bygget och referera den i
+                // sitt eget projekt. Lagren är redan cachade från föregående stage, och
+                // Jenkins-noden behöver inget .NET SDK installerat.
                 sh '''
                     rm -rf artifacts
                     DOCKER_BUILDKIT=1 docker build -f Dockerfile \
-                        --target package \
+                        --target api \
                         --output type=local,dest=artifacts .
                 '''
-                archiveArtifacts artifacts: 'artifacts/*.nupkg', fingerprint: true, allowEmptyArchive: false
+                archiveArtifacts artifacts: 'artifacts/McAdminPlugins.dll', fingerprint: true, allowEmptyArchive: false
             }
         }
 
