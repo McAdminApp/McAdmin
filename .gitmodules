@@ -1,0 +1,3 @@
+[submodule "Example-Plugin"]
+	path = Example-Plugin
+	url = https://github.com/McAdminApp/Plugin-Example.git
