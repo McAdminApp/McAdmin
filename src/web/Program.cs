@@ -1,7 +1,9 @@
+using McAdminPlugins;
 using McServerMgmnt.Components;
 using McServerMgmnt.Data;
 using McServerMgmnt.Services;
 using McServerMgmnt.Services.Factories;
+using McServerMgmnt.Services.Plugins;
 using McServerMgmnt.Services.Rcon;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
@@ -36,6 +38,13 @@ builder.Services.AddSingleton<IMinecraftServerController>(sp =>
         ? ActivatorUtilities.CreateInstance<RconServerController>(sp)
         : new PlaceholderServerController());
 
+// Plugins. The registry is what the router and the sidebar read from; the file store
+// is the only way a plugin reaches the Minecraft server's plugins folder.
+builder.Services.Configure<PluginOptions>(builder.Configuration.GetSection(PluginOptions.SectionName));
+builder.Services.AddSingleton<PluginRegistry>();
+builder.Services.AddSingleton<IPluginNavigation>(sp => sp.GetRequiredService<PluginRegistry>());
+builder.Services.AddSingleton<IServerPluginFiles, ServerPluginFiles>();
+
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(options =>
     {
@@ -55,6 +64,9 @@ builder.Services.AddCascadingAuthenticationState();
 var app = builder.Build();
 
 await DbInitializer.InitializeAsync(app.Services);
+
+// Before the first request: the router needs the plugin assemblies to route into them.
+await PluginLoader.LoadAsync(app.Services);
 
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())
@@ -81,7 +93,14 @@ app.MapPost("/account/logout", async (HttpContext context, IAntiforgery antiforg
 }).RequireAuthorization();
 
 app.MapStaticAssets();
+
+// Two registrations are needed for a plugin page to be reachable, and they cover
+// different halves of the request. AddAdditionalAssemblies creates the endpoints that
+// answer the first, server-rendered hit on the URL; the Router in Routes.razor gets the
+// same list so navigating there from inside a live circuit resolves too. With only one
+// of them a plugin page either 404s or dead-ends on client-side navigation.
 app.MapRazorComponents<App>()
-    .AddInteractiveServerRenderMode();
+    .AddInteractiveServerRenderMode()
+    .AddAdditionalAssemblies(app.Services.GetRequiredService<PluginRegistry>().RouteAssemblies.ToArray());
 
 app.Run();

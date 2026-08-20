@@ -1,3 +1,5 @@
+@inject PluginRegistry Plugins
+
 <nav class="sidebar">
     <div class="brand">
         <StatusBlock State="running" CssClass="block--mark" Label="McAdmin"/>
@@ -26,6 +28,25 @@
             <span class="nav-glyph glyph-account" aria-hidden="true"></span> Your account
         </NavLink>
 
+        @if (Plugins.NavItems.Count > 0)
+        {
+            <div class="nav-section eyebrow">Plugins</div>
+
+            @foreach (var item in Plugins.NavItems)
+            {
+                @if (item.AdministratorOnly)
+                {
+                    <AuthorizeView Roles="@UserRoles.Administrator">
+                        @PluginLink(item)
+                    </AuthorizeView>
+                }
+                else
+                {
+                    @PluginLink(item)
+                }
+            }
+        }
+
         <AuthorizeView Roles="@UserRoles.Administrator">
             <div class="nav-section eyebrow">Administration</div>
             <NavLink class="nav-link" href="/users">
@@ -52,4 +73,10 @@
 @code {
     private static string Initial(string? name) =>
         string.IsNullOrEmpty(name) ? "?" : name[..1];
+
+    // A plugin picks its own glyph out of app.css; anything unset gets the generic one.
+    private static RenderFragment PluginLink(PluginNavItem item) =>
+        @<NavLink class="nav-link" href="@item.Href">
+            <span class="nav-glyph @(item.Glyph ?? "glyph-plugin")" aria-hidden="true"></span> @item.Text
+        </NavLink>;
 }

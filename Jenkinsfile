@@ -24,11 +24,29 @@ pipeline {
         stage('Bygg image') {
             agent { label 'deb-slave01' }
             steps {
+                // Kontexten är repots rot, inte src/web — webbprojektet refererar
+                // plugin-projektet och båda måste ligga innanför kontexten.
                 sh '''
                     docker build -f Dockerfile \
                         -t ${IMAGE_NAME}:${BUILD_NUMBER} \
                         -t ${IMAGE_NAME}:latest .
                 '''
+            }
+        }
+
+        stage('Paketera plugin-API') {
+            agent { label 'deb-slave01' }
+            steps {
+                // Plugin-API:t packas i samma image-bygge och exporteras som .nupkg,
+                // så Jenkins-noden inte behöver något .NET SDK installerat. Lagren
+                // från föregående stage är redan cachade, så det här går fort.
+                sh '''
+                    rm -rf artifacts
+                    DOCKER_BUILDKIT=1 docker build -f Dockerfile \
+                        --target package \
+                        --output type=local,dest=artifacts .
+                '''
+                archiveArtifacts artifacts: 'artifacts/*.nupkg', fingerprint: true, allowEmptyArchive: false
             }
         }
 
@@ -40,6 +58,10 @@ pipeline {
                 withCredentials([
                     string(credentialsId: 'mcservermgmnt-rcon-password', variable: 'MC_RCON_PASSWORD')
                 ]) {
+                    // docker-compose.yml ligger kvar i repots rot. Compose härleder
+                    // projektnamnet ur katalogen filen står i, och projektnamnet är det
+                    // som prefixar volymerna mcservermgmnt_data och _keys. Flyttas filen
+                    // ner i src/web tappar deployen både databasen och auth-nycklarna.
                     sh 'docker compose up -d --force-recreate'
                 }
             }

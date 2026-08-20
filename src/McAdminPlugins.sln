@@ -1,0 +1,22 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "McAdminPlugins", "plugin\McAdminPlugins.csproj", "{FFEAEA1F-18C5-42F1-8374-98B8E04EF037}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "McServerMgmnt", "web\McServerMgmnt.csproj", "{5A3295BE-405E-4F4E-BE94-38B07A6B7C00}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{FFEAEA1F-18C5-42F1-8374-98B8E04EF037}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FFEAEA1F-18C5-42F1-8374-98B8E04EF037}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FFEAEA1F-18C5-42F1-8374-98B8E04EF037}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FFEAEA1F-18C5-42F1-8374-98B8E04EF037}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5A3295BE-405E-4F4E-BE94-38B07A6B7C00}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5A3295BE-405E-4F4E-BE94-38B07A6B7C00}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5A3295BE-405E-4F4E-BE94-38B07A6B7C00}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5A3295BE-405E-4F4E-BE94-38B07A6B7C00}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

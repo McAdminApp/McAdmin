@@ -4,7 +4,21 @@
 **/bin
 **/obj
 **/data
-*.user
+**/*.user
+**/*.DotSettings.user
+
+# Bygg- och driftfiler som inte hör hemma i kontexten.
 docker-compose*.yml
 Dockerfile
 Jenkinsfile
+DEPLOY.md
+PLUGINS.md
+artifacts/
+
+# Lokal körningsdata från utvecklingsmaskinen. Ligger i repots rot och skulle
+# annars följa med in i imagen och skriva över det som är mountat i containern.
+*.db
+*.db-shm
+*.db-wal
+whitelist.json
+server.properties

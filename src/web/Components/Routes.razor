@@ -1,6 +1,11 @@
 @using Microsoft.AspNetCore.Components.Authorization
+@using McServerMgmnt.Services.Plugins
+@inject PluginRegistry Plugins
 
-<Router AppAssembly="typeof(Program).Assembly" NotFoundPage="typeof(Pages.NotFound)">
+@* AdditionalAssemblies is how a page inside a plugin .dll becomes routable. *@
+<Router AppAssembly="typeof(Program).Assembly"
+        AdditionalAssemblies="Plugins.RouteAssemblies"
+        NotFoundPage="typeof(Pages.NotFound)">
     <Found Context="routeData">
         <AuthorizeRouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)">
             <NotAuthorized>

@@ -1,5 +1,6 @@
 services:
   web:
+    # Kontexten är repots rot: Dockerfile bygger src/web och src/plugin tillsammans.
     build: .
     image: mcservermgmnt:latest
     container_name: mcservermgmnt
@@ -15,6 +16,12 @@ services:
       # Inställningssidan läser och skriver den här filen.
       - /opt/minecraft/server.properties:/app/server.properties
       - /opt/minecraft/whitelist.json:/app/whitelist.json
+      # Minecraft-serverns plugins-katalog. Det är konfigfilerna här som ett
+      # McAdmin-plugin får läsa och skriva.
+      - /opt/minecraft/plugins:/app/plugins
+      # Släppkatalog för McAdmin-plugins (assemblies byggda mot McAdminPlugins).
+      # Avkommentera när plugin-laddaren i webbappen är på plats.
+      #- /opt/mcadmin/addons:/app/addons:ro
       # Serverkatalogen, läsbar, för konsolloggen. RCON returnerar bara svar på kommandon
       # och aldrig serverns egen utskrift, så loggpanelen kommer härifrån.
       - /opt/minecraft:/srv/minecraft:ro
