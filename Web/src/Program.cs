@@ -1,4 +1,4 @@
-using McAdminPlugins;
+﻿using McAdminPlugins;
 using McServerMgmnt.Components;
 using McServerMgmnt.Data;
 using McServerMgmnt.Services;
@@ -43,6 +43,7 @@ builder.Services.AddSingleton<IMinecraftServerController>(sp =>
 builder.Services.Configure<PluginOptions>(builder.Configuration.GetSection(PluginOptions.SectionName));
 builder.Services.AddSingleton<PluginRegistry>();
 builder.Services.AddSingleton<IPluginNavigation>(sp => sp.GetRequiredService<PluginRegistry>());
+builder.Services.AddSingleton<IPluginPages>(sp => sp.GetRequiredService<PluginRegistry>());
 builder.Services.AddSingleton<IServerPluginFiles, ServerPluginFiles>();
 
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)

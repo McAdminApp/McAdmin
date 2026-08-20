@@ -1,10 +1,15 @@
 # Plugins
 
 McAdmin loads plugins from a folder at startup. A plugin is an ordinary .NET assembly
-built against `McAdminPlugins`, and it can do two things:
+built against `McAdminPlugins`, and it can do three things:
 
-* add pages to the navigation menu, and
+* describe pages that the host renders in its own design — no markup involved,
+* bring its own Razor components when a page needs something the description cannot
+  express, and
 * read and write config files in the Minecraft server's own plugins folder.
+
+Start with a described page. It is less code, it cannot drift out of step with the app's
+look, and it cannot end up on a route that does not exist.
 
 | Project   | Role |
 |-----------|------|
@@ -20,8 +25,9 @@ built against `McAdminPlugins`, and it can do two things:
 Get `McAdminPlugins.dll` — it is archived as an artifact on the Jenkins build — and put
 it somewhere in your project, for example a `lib/` folder.
 
-A plugin that only touches config files can be a plain `Microsoft.NET.Sdk` project. One
-that adds pages needs `Microsoft.NET.Sdk.Razor`:
+A plugin that describes its pages, touches config files, or both is a plain
+`Microsoft.NET.Sdk` project — it needs nothing from ASP.NET. Only a plugin that ships
+Razor components of its own needs `Microsoft.NET.Sdk.Razor`:
 
 ```xml
 <Project Sdk="Microsoft.NET.Sdk.Razor">
@@ -59,17 +65,16 @@ using McAdminPlugins;
 
 namespace MyPlugin;
 
-public sealed class MyPlugin(IPluginNavigation nav, IServerPluginFiles files) : IPlugin
+public sealed class MyPlugin(IPluginPages pages, IServerPluginFiles files) : IPlugin
 {
-    public static IServerPluginFiles? Files { get; private set; }
-
     public Task Load()
     {
-        Files = files;
-
-        nav.AddPage("Essentials", "/essentials", order: 10);
-        nav.AddPage(new PluginNavItem("Clear cache", "/essentials/admin",
-            AdministratorOnly: true, Order: 20));
+        pages.AddPage(new PluginPage("essentials", "Essentials")
+        {
+            Description = "EssentialsX configuration.",
+            Order = 10,
+            Sections = [ /* see below */ ]
+        });
 
         return Task.CompletedTask;
     }
@@ -78,13 +83,116 @@ public sealed class MyPlugin(IPluginNavigation nav, IServerPluginFiles files) : 
 
 The constructor goes through the host's DI container, so you can ask for any registered
 service — `ILogger<MyPlugin>`, for instance. The instance lives for the lifetime of the
-app and must therefore not hold on to anything scoped; pages that need scoped services
-inject them themselves.
+app and must therefore not hold on to anything scoped.
 
-### 3. Add a page
+Hold the services you need in fields and close over them from the section callbacks, as
+the example below does. A described page needs no static back door to reach them, which
+is the other reason to prefer it over a component of your own.
 
-An ordinary Razor component with `@page`. The route has to match the `Href` you
-registered:
+### 3. Describe a page
+
+Hand the host a `PluginPage`: a slug, a title and a list of sections. The host routes it
+at `/addon/{slug}`, draws the heading, adds the sidebar entry and renders every section
+with the same markup its own pages use.
+
+```csharp
+pages.AddPage(new PluginPage("essentials", "Essentials")
+{
+    Description = "Read from EssentialsX/config.yml. Nothing is written until you save.",
+    Sections =
+    [
+        new PluginSettingsSection
+        {
+            Title = "General",
+            LoadAsync = async ct =>
+            [
+                new PluginField("motd", "Message of the day")
+                {
+                    Value = await ReadAsync("motd", ct),
+                    Description = "Shown to players as they join."
+                },
+                new PluginField("god-mode", "God mode")
+                {
+                    Kind = PluginFieldKind.Toggle,
+                    Value = await ReadAsync("god-mode", ct),
+                    Group = "Gameplay",
+                    RequiresRestart = true
+                }
+            ],
+            SaveAsync = async (changes, ct) =>
+            {
+                foreach (var (key, value) in changes)
+                    await WriteAsync(key, value, ct);
+
+                return PluginResult.Success();
+            }
+        }
+    ]
+});
+```
+
+That is the whole page. It gets the filter box, the grouped rows, per-row **Undo**, the
+"2 unsaved changes" command bar and the green or red notice afterwards — the same ones
+the server settings page has, because it is the same renderer.
+
+**The sections**
+
+| Section | What it draws |
+|---------|---------------|
+| `PluginSettingsSection` | The settings table: grouped rows, filter, Undo, and a save bar. `SaveAsync` gets only the keys that changed. |
+| `PluginTableSection` | A read-only table with optional per-row buttons. A button with `Confirm` set asks in the row before it runs. |
+| `PluginFormSection` | A handful of fields and one submit button. Clears itself on success unless `KeepValues` says otherwise. |
+| `PluginActionsSection` | Buttons that do something and report back. |
+| `PluginNoticeSection` | One of the four coloured banners. |
+| `PluginTextSection` | Paragraphs, and a readout of label/value pairs. |
+
+Sections load their own data, which is why every one of them takes callbacks rather than
+a finished list: after a successful save or row action the host calls `LoadAsync` again,
+so what is on screen is what is stored.
+
+Handlers return a `PluginResult`, and the host turns it into a notice. Throwing works
+too — the exception message is shown as the error and the rest of the app is unaffected:
+
+```csharp
+SaveAsync = async (changes, ct) =>
+{
+    if (changes.ContainsKey("port"))
+        return PluginResult.Failure("The port cannot be changed while the server is up.");
+
+    await WriteAsync(changes, ct);
+    return PluginResult.Success("Written. Restart for it to take effect.");
+}
+```
+
+Set `AdministratorOnly` to keep a page to administrators; unlike a nav flag that only
+hides the link, the host enforces it on the route itself. Use `BuildAsync` instead of
+`Sections` when the list of sections depends on data — one section per config file
+found, say.
+
+### 4. Or write the markup yourself
+
+When a page needs something the sections cannot express, it can still be an ordinary
+Razor component with `@page`. Register the sidebar entry through `IPluginNavigation`,
+and make sure the route matches the `Href` you registered.
+
+A component is constructed by Blazor, not by you, so it cannot reach the plugin instance
+or anything the plugin was handed. Park what the page needs on a static, which is the
+one thing a described page saves you from:
+
+```csharp
+public sealed class MyPlugin(IPluginNavigation nav, IServerPluginFiles files) : IPlugin
+{
+    public static IServerPluginFiles? Files { get; private set; }
+
+    public Task Load()
+    {
+        Files = files;
+        nav.AddPage("Essentials", "/essentials", order: 10);
+
+        return Task.CompletedTask;
+    }
+}
+```
 
 ```razor
 @page "/essentials"
@@ -109,7 +217,11 @@ The page gets the host's `MainLayout` and its CSS classes automatically. Add
 `@attribute [Authorize]` if it should not be open to signed-out visitors — the route is
 open until you say otherwise, exactly like the app's own pages.
 
-### 4. Build and drop it in
+This is the path that costs you the app's design: every class you use here is one you
+have to keep in step with `app.css` by hand, and a `PluginNavItem` whose `Href` has no
+matching route lands the user on the 404 page. A described page has neither problem.
+
+### 5. Build and drop it in
 
 ```sh
 dotnet build -c Release
@@ -161,6 +273,40 @@ that is a UI filter, so protect the page itself with
 
 `Glyph` is one of the `glyph-*` classes in `app.css`; leaving it out gives the generic
 plugin icon.
+
+### `IPluginPages`
+
+```csharp
+void AddPage(PluginPage page);
+void AddPage(string slug, string title, params PluginSection[] sections);
+```
+
+Registers a described page. The host routes it at `/addon/{slug}`, renders it, and adds
+its sidebar entry unless `ShowInNavigation` is false. Slugs are lowercase letters,
+digits and hyphens, and they are global: the second plugin to claim one fails to load,
+alone, and the first keeps the route.
+
+### `PluginPage`
+
+| Member | Meaning |
+|--------|---------|
+| `Slug`, `Title` | Constructor arguments. The slug is the URL, the title is the heading and the sidebar label. |
+| `Eyebrow`, `Description` | The small label above the heading, and the paragraph under it. |
+| `Sections` | What goes on the page, top to bottom. |
+| `BuildAsync` | Builds the section list per visit, for a page whose shape depends on data. Wins over `Sections`. |
+| `Glyph`, `Order`, `NavigationText`, `ShowInNavigation` | The sidebar entry the host creates for the page. |
+| `AdministratorOnly` | Enforced on the route, not just in the sidebar. |
+| `Href` | Where the page ended up. Use it to link to it from elsewhere. |
+
+Every editable value is a `PluginField`: a `Key`, a `Label`, a `Kind` (`Text`, `Number`,
+`Toggle`, `Choice`, `Password`, `LongText`) and the `Value` as it is stored right now.
+Values are strings in both directions — the host has no idea what your config format
+wants, and a string survives `.properties`, YAML and JSON unchanged.
+
+Handlers return a `PluginResult`: `PluginResult.Success("Saved.")`,
+`PluginResult.Failure("...")`, or `PluginResult.None` to say nothing at all. An
+exception is caught and shown as a failure, and a failed save keeps the user's edits
+on screen.
 
 ### `IServerPluginFiles`
 
@@ -241,9 +387,16 @@ updating one means restarting.
 A `Resolving` hook on the default context probes the plugin folders, so a plugin that
 brings dependencies of its own gets them resolved out of its own folder.
 
-**`PluginRegistry`** is a singleton holding nav items, route assemblies and load
-results. It implements `IPluginNavigation`, which is what plugins see. Everything is
-written during startup and only read afterwards.
+**`PluginRegistry`** is a singleton holding nav items, route assemblies, described
+pages and load results. It implements `IPluginNavigation` and `IPluginPages`, which is
+what plugins see. Everything is written during startup and only read afterwards.
+
+**`Components/Addons/`** renders described pages. `AddonPage.razor` owns the single
+route `/addon/{slug}`, looks the page up in the registry and draws the heading;
+`AddonSection.razor` maps each section to the component that renders it. A described
+page therefore needs nothing from the routing machinery below — the route exists whether
+or not any plugin is loaded, so `AdditionalAssemblies` only matters to plugins that
+bring components of their own.
 
 **Routing needs two registrations**, covering one half of a request each:
 
@@ -274,6 +427,10 @@ the list is not empty. Entries marked `AdministratorOnly` are wrapped in `Author
 * **A plugin's `wwwroot` is not served.** Static assets in a Razor class library are
   wired up at build time, and a plugin is loaded after that. Use the host's CSS classes,
   or put CSS and JS inline in the component.
+* **A described page can only say what the sections can express.** The vocabulary is
+  deliberately small, and the host owns the markup — that is what keeps addons looking
+  like the app. A page that needs more than the sections offer has to bring its own
+  Razor component, and pay for it in maintenance.
 * **Plugins run with full privileges inside the app's process.** There is no sandbox
   beyond `IServerPluginFiles` staying inside the plugins folder — a plugin can otherwise
   do anything the app can. Only install code you trust.
