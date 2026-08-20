@@ -1,0 +1,12 @@
+@* Whatever a plugin handler last reported, drawn as one of the app's own notices. *@
+
+@if (Result is { Message: not null and not "" })
+{
+    <div class="notice @(Result.Ok ? "notice--good" : "notice--error")" role="@(Result.Ok ? "status" : "alert")">
+        <span>@Result.Message</span>
+    </div>
+}
+
+@code {
+    [Parameter] public PluginResult? Result { get; set; }
+}

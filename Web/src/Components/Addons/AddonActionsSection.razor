@@ -1,0 +1,92 @@
+@implements IDisposable
+
+@* Buttons that do something and report back. Anything destructive turns into its own
+   question first, so a mis-click costs one extra button press and nothing else. *@
+
+<AddonMessage Result="result"/>
+
+<AddonSlot Title="@Section.Title" Description="@Section.Description">
+    <ChildContent>
+        <div class="slot-body">
+            @if (confirming is { } pending)
+            {
+                <div class="row-actions">
+                    <span>@pending.Confirm</span>
+                    <button class="btn btn--small btn--danger" disabled="@busy" @onclick="() => RunAsync(pending)">Yes</button>
+                    <button class="btn btn--small btn--link" disabled="@busy" @onclick="() => confirming = null">Cancel</button>
+                </div>
+            }
+            else
+            {
+                @foreach (var action in Section.Actions)
+                {
+                    <div class="row-actions" style="margin-bottom: 0.4rem;">
+                        <button class="btn btn--small @ButtonClass(action.Style)" disabled="@busy"
+                                @onclick="() => Click(action)">@action.Label</button>
+                        @if (!string.IsNullOrWhiteSpace(action.Description))
+                        {
+                            <span class="muted">@action.Description</span>
+                        }
+                    </div>
+                }
+            }
+        </div>
+    </ChildContent>
+</AddonSlot>
+
+@code {
+    [Parameter, EditorRequired] public PluginActionsSection Section { get; set; } = default!;
+
+    private readonly CancellationTokenSource cts = new();
+
+    private PluginAction? confirming;
+    private PluginResult? result;
+    private bool busy;
+
+    private static string ButtonClass(PluginButtonStyle style) => style switch
+    {
+        PluginButtonStyle.Primary => "btn--primary",
+        PluginButtonStyle.Danger => "btn--danger",
+        PluginButtonStyle.Link => "btn--link",
+        _ => string.Empty
+    };
+
+    private Task Click(PluginAction action)
+    {
+        if (!string.IsNullOrWhiteSpace(action.Confirm))
+        {
+            confirming = action;
+            result = null;
+            return Task.CompletedTask;
+        }
+
+        return RunAsync(action);
+    }
+
+    private async Task RunAsync(PluginAction action)
+    {
+        busy = true;
+        confirming = null;
+        result = null;
+
+        try
+        {
+            var outcome = await action.InvokeAsync(cts.Token);
+            result = outcome.Message is null ? null : outcome;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            result = PluginResult.Failure(ex.Message);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    public void Dispose()
+    {
+        cts.Cancel();
+        cts.Dispose();
+    }
+}

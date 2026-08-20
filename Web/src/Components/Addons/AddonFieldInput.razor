@@ -1,0 +1,65 @@
+@* One control, picked from the field's kind. Shared by settings tables and forms so
+   the two never drift apart. *@
+
+@switch (Field.Kind)
+{
+    case PluginFieldKind.Toggle:
+        <label class="check">
+            <input type="checkbox" id="@Id" checked="@IsOn" disabled="@Disabled"
+                   @onchange="ToggleChanged"
+                   aria-label="@Field.Label"/>
+            <span>@(IsOn ? "On" : "Off")</span>
+        </label>
+        break;
+
+    case PluginFieldKind.Choice:
+        <select id="@Id" value="@Value" disabled="@Disabled" aria-label="@Field.Label"
+                @onchange="e => Changed(e.Value?.ToString())">
+            @foreach (var choice in Field.Choices ?? [])
+            {
+                <option value="@choice">@choice</option>
+            }
+        </select>
+        break;
+
+    case PluginFieldKind.Number:
+        <input type="number" id="@Id" value="@Value" disabled="@Disabled" aria-label="@Field.Label"
+               min="@Field.Minimum" max="@Field.Maximum" placeholder="@Field.Placeholder"
+               @onchange="e => Changed(e.Value?.ToString())"/>
+        break;
+
+    case PluginFieldKind.Password:
+        <input type="password" id="@Id" value="@Value" disabled="@Disabled" aria-label="@Field.Label"
+               autocomplete="off" placeholder="@Field.Placeholder"
+               @onchange="e => Changed(e.Value?.ToString())"/>
+        break;
+
+    case PluginFieldKind.LongText:
+        <textarea rows="4" id="@Id" disabled="@Disabled" aria-label="@Field.Label" placeholder="@Field.Placeholder"
+                  @onchange="e => Changed(e.Value?.ToString())">@Value</textarea>
+        break;
+
+    default:
+        <input type="text" id="@Id" value="@Value" disabled="@Disabled" aria-label="@Field.Label"
+               placeholder="@Field.Placeholder" @onchange="e => Changed(e.Value?.ToString())"/>
+        break;
+}
+
+@code {
+    [Parameter, EditorRequired] public PluginField Field { get; set; } = default!;
+
+    [Parameter] public string Value { get; set; } = string.Empty;
+
+    [Parameter] public EventCallback<string> ValueChanged { get; set; }
+
+    [Parameter] public bool Disabled { get; set; }
+
+    /// <summary>Set by forms so their labels have something to point at.</summary>
+    [Parameter] public string? Id { get; set; }
+
+    private bool IsOn => Value == "true";
+
+    private Task Changed(string? value) => ValueChanged.InvokeAsync(value ?? string.Empty);
+
+    private Task ToggleChanged(ChangeEventArgs e) => Changed(e.Value is true ? "true" : "false");
+}

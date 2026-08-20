@@ -1,0 +1,32 @@
+@* The panel every addon section sits in, so a described page is built from the same
+   slots as the pages the app ships with. *@
+
+<section class="slot">
+    @if (!string.IsNullOrWhiteSpace(Title) || HeadContent is not null)
+    {
+        <div class="slot-head">
+            <h2>@Title</h2>
+            @HeadContent
+        </div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(Description))
+    {
+        <div class="slot-body" style="padding-bottom: 0;">
+            <p class="muted" style="margin: 0;">@Description</p>
+        </div>
+    }
+
+    @ChildContent
+</section>
+
+@code {
+    [Parameter] public string? Title { get; set; }
+
+    [Parameter] public string? Description { get; set; }
+
+    /// <summary>Sits to the right of the heading — a filter box, usually.</summary>
+    [Parameter] public RenderFragment? HeadContent { get; set; }
+
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

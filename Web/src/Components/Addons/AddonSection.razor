@@ -1,0 +1,75 @@
+@* Turns one described section into markup. Everything a plugin can put on a page is
+   listed here, and a section type this does not know about is simply skipped. *@
+
+@switch (Section)
+{
+    case PluginSettingsSection settings:
+        <AddonSettingsSection Section="settings"/>
+        break;
+
+    case PluginTableSection table:
+        <AddonTableSection Section="table"/>
+        break;
+
+    case PluginFormSection form:
+        <AddonFormSection Section="form"/>
+        break;
+
+    case PluginActionsSection actions:
+        <AddonActionsSection Section="actions"/>
+        break;
+
+    case PluginNoticeSection notice:
+        <div class="@NoticeClass(notice.Kind)" role="@(notice.Kind is PluginNoticeKind.Error ? "alert" : "status")">
+            <span>
+                @if (!string.IsNullOrWhiteSpace(notice.Heading))
+                {
+                    <strong>@notice.Heading</strong>
+                    @(" ")
+                }
+                @notice.Text
+            </span>
+        </div>
+        break;
+
+    case PluginTextSection text:
+        <AddonSlot Title="@text.Title" Description="@text.Description">
+            <ChildContent>
+                @if (text.Facts.Count > 0)
+                {
+                    <dl class="readout">
+                        @foreach (var fact in text.Facts)
+                        {
+                            <div class="readout-cell">
+                                <dt>@fact.Label</dt>
+                                <dd>@fact.Value</dd>
+                            </div>
+                        }
+                    </dl>
+                }
+
+                @if (text.Paragraphs.Count > 0)
+                {
+                    <div class="slot-body">
+                        @foreach (var paragraph in text.Paragraphs)
+                        {
+                            <p>@paragraph</p>
+                        }
+                    </div>
+                }
+            </ChildContent>
+        </AddonSlot>
+        break;
+}
+
+@code {
+    [Parameter, EditorRequired] public PluginSection Section { get; set; } = default!;
+
+    private static string NoticeClass(PluginNoticeKind kind) => kind switch
+    {
+        PluginNoticeKind.Good => "notice notice--good",
+        PluginNoticeKind.Warning => "notice notice--warn",
+        PluginNoticeKind.Error => "notice notice--error",
+        _ => "notice"
+    };
+}

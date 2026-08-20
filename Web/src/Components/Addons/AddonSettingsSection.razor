@@ -1,0 +1,218 @@
+@implements IDisposable
+
+@* The server.properties table, handed to plugins. Edits are held here and nothing
+   reaches the plugin until Save, which then gets only the keys that differ. *@
+
+<AddonMessage Result="result"/>
+
+<AddonSlot Title="@(Section.Title ?? "Settings")" Description="@Section.Description">
+    <HeadContent>
+        @if (Section.Filterable && fields.Count > 0)
+        {
+            <input type="search" placeholder="Filter settings" @bind="filter" @bind:event="oninput"
+                   aria-label="Filter settings" style="width: 14rem;"/>
+        }
+    </HeadContent>
+
+    <ChildContent>
+        @if (loading)
+        {
+            <div class="empty">Reading the settings…</div>
+        }
+        else if (fields.Count == 0)
+        {
+            <div class="empty">@Section.EmptyText</div>
+        }
+        else if (Visible.Count == 0)
+        {
+            <div class="empty">
+                <h3>No setting matches “@filter”</h3>
+                <p class="muted" style="margin: 0;">Try the key instead of the label.</p>
+            </div>
+        }
+        else
+        {
+            <div class="table-scroll">
+                <table class="table table--settings">
+                    <thead>
+                    <tr>
+                        <th>Setting</th>
+                        <th>Value</th>
+                        <th></th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var group in Visible.GroupBy(f => f.Group))
+                    {
+                        @* One group only means the plugin did not care about grouping. *@
+                        @if (grouped)
+                        {
+                            <tr class="group-row">
+                                <td colspan="3"><span class="eyebrow">@group.Key</span></td>
+                            </tr>
+                        }
+
+                        @foreach (var field in group)
+                        {
+                            var changed = edits.ContainsKey(field.Key);
+
+                            <tr data-changed="@(changed ? "yes" : null)">
+                                <td>
+                                    <strong>@field.Label</strong>
+                                    @if (field.ShowKey)
+                                    {
+                                        <span class="setting-key mono">@field.Key</span>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(field.Description))
+                                    {
+                                        <span class="setting-help">@field.Description</span>
+                                    }
+                                </td>
+                                <td class="setting-value">
+                                    <AddonFieldInput Field="field" Value="@ValueOf(field)" Disabled="busy"
+                                                     ValueChanged="v => Set(field, v)"/>
+                                </td>
+                                <td>
+                                    <div class="row-actions">
+                                        @if (changed && field.RequiresRestart)
+                                        {
+                                            <span class="tag tag--admin">Restart to apply</span>
+                                        }
+                                        @if (changed)
+                                        {
+                                            <button class="btn btn--small btn--link" @onclick="() => edits.Remove(field.Key)">Undo</button>
+                                        }
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    }
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="command-bar">
+                <span class="muted" style="flex: 1;">
+                    @(edits.Count switch
+                    {
+                        0 => "No unsaved changes.",
+                        1 => "1 unsaved change.",
+                        _ => $"{edits.Count} unsaved changes."
+                    })
+                </span>
+                <button class="btn btn--small" @onclick="DiscardAll" disabled="@(busy || edits.Count == 0)">Discard changes</button>
+                <button class="btn btn--small btn--primary" @onclick="SaveAsync" disabled="@(busy || edits.Count == 0)">@Section.SaveLabel</button>
+            </div>
+        }
+    </ChildContent>
+</AddonSlot>
+
+@code {
+    [Parameter, EditorRequired] public PluginSettingsSection Section { get; set; } = default!;
+
+    private readonly CancellationTokenSource cts = new();
+
+    /// <summary>Pending edits, keyed by field key. A key is here only while it differs from what is stored.</summary>
+    private readonly Dictionary<string, string> edits = [];
+
+    private IReadOnlyList<PluginField> fields = [];
+    private string filter = string.Empty;
+    private PluginResult? result;
+    private bool loading = true;
+    private bool busy;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+
+        try
+        {
+            fields = await Section.LoadAsync(cts.Token);
+            edits.Clear();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            fields = [];
+            result = PluginResult.Failure(ex.Message);
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private bool grouped => fields.Select(f => f.Group).Distinct().Count() > 1;
+
+    private List<PluginField> Visible =>
+        string.IsNullOrWhiteSpace(filter)
+            ? fields.ToList()
+            : fields.Where(f =>
+                f.Key.Contains(filter, StringComparison.OrdinalIgnoreCase)
+                || f.Label.Contains(filter, StringComparison.OrdinalIgnoreCase)
+                || (f.Description ?? string.Empty).Contains(filter, StringComparison.OrdinalIgnoreCase)
+                || f.Group.Contains(filter, StringComparison.OrdinalIgnoreCase)).ToList();
+
+    private string ValueOf(PluginField field) =>
+        edits.TryGetValue(field.Key, out var edited) ? edited : field.Value ?? string.Empty;
+
+    private void Set(PluginField field, string value)
+    {
+        result = null;
+
+        // Editing a value back to what is stored is not a change.
+        if (value == (field.Value ?? string.Empty))
+            edits.Remove(field.Key);
+        else
+            edits[field.Key] = value;
+    }
+
+    private void DiscardAll()
+    {
+        edits.Clear();
+        result = null;
+    }
+
+    private async Task SaveAsync()
+    {
+        busy = true;
+        result = null;
+
+        var count = edits.Count;
+
+        try
+        {
+            var outcome = await Section.SaveAsync(new Dictionary<string, string>(edits), cts.Token);
+
+            if (outcome.Ok)
+            {
+                // Reload rather than trust the edits: saving may normalise what was written.
+                await LoadAsync();
+
+                result = outcome.Message is null
+                    ? PluginResult.Success(count == 1 ? "Saved 1 setting." : $"Saved {count} settings.")
+                    : outcome;
+            }
+            else
+            {
+                // Keep the edits so nothing the user typed is lost.
+                result = outcome;
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            result = PluginResult.Failure(ex.Message);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    public void Dispose()
+    {
+        cts.Cancel();
+        cts.Dispose();
+    }
+}

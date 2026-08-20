@@ -1,0 +1,222 @@
+@implements IDisposable
+
+@* A read-only table with optional per-row buttons. Confirmation is drawn into the row
+   itself rather than through a JS dialog, the way a pending whitelist change is. *@
+
+<AddonMessage Result="result"/>
+
+<AddonSlot Title="@(Section.Title ?? "Overview")" Description="@Section.Description">
+    <HeadContent>
+        @if (Section.Filterable && rows.Count > 0)
+        {
+            <input type="search" placeholder="Filter" @bind="filter" @bind:event="oninput"
+                   aria-label="Filter rows" style="width: 14rem;"/>
+        }
+    </HeadContent>
+
+    <ChildContent>
+        @if (loading)
+        {
+            <div class="empty">Loading…</div>
+        }
+        else if (rows.Count == 0)
+        {
+            <div class="empty">
+                <h3>@Section.EmptyTitle</h3>
+                @if (!string.IsNullOrWhiteSpace(Section.EmptyText))
+                {
+                    <p class="muted" style="margin: 0;">@Section.EmptyText</p>
+                }
+            </div>
+        }
+        else if (Visible.Count == 0)
+        {
+            <div class="empty">
+                <h3>Nothing matches “@filter”</h3>
+            </div>
+        }
+        else
+        {
+            <div class="table-scroll">
+                <table class="table table--settings">
+                    <thead>
+                    <tr>
+                        @foreach (var column in Section.Columns)
+                        {
+                            <th>@column.Header</th>
+                        }
+                        @if (Section.RowActions.Count > 0)
+                        {
+                            <th></th>
+                        }
+                    </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var row in Visible)
+                    {
+                        <tr data-changed="@(row.Highlight ? "yes" : null)">
+                            @for (var i = 0; i < Section.Columns.Count; i++)
+                            {
+                                var column = Section.Columns[i];
+                                var cell = i < row.Cells.Length ? row.Cells[i] : null;
+
+                                <td class="@CellClass(column)">
+                                    @if (string.IsNullOrWhiteSpace(cell))
+                                    {
+                                        <span title="No value">—</span>
+                                    }
+                                    else if (column.Style is PluginCellStyle.Strong)
+                                    {
+                                        <strong>@cell</strong>
+                                    }
+                                    else if (column.Style is PluginCellStyle.Tag)
+                                    {
+                                        <span class="tag">@cell</span>
+                                    }
+                                    else
+                                    {
+                                        @cell
+                                    }
+
+                                    @if (i == 0 && !string.IsNullOrWhiteSpace(row.Note))
+                                    {
+                                        <span class="setting-help">@row.Note</span>
+                                    }
+                                </td>
+                            }
+
+                            @if (Section.RowActions.Count > 0)
+                            {
+                                <td>
+                                    <div class="row-actions">
+                                        @if (Pending(row) is { } pending)
+                                        {
+                                            <span class="setting-help">@pending.Confirm</span>
+                                            <button class="btn btn--small btn--danger" disabled="@busy"
+                                                    @onclick="() => RunAsync(pending, row)">Yes</button>
+                                            <button class="btn btn--small btn--link" disabled="@busy"
+                                                    @onclick="() => confirming = null">Cancel</button>
+                                        }
+                                        else
+                                        {
+                                            @foreach (var action in Section.RowActions.Where(a => a.IsVisible?.Invoke(row) ?? true))
+                                            {
+                                                <button class="btn btn--small @ButtonClass(action.Style)" disabled="@busy"
+                                                        @onclick="() => Click(action, row)">@action.Label</button>
+                                            }
+                                        }
+                                    </div>
+                                </td>
+                            }
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </ChildContent>
+</AddonSlot>
+
+@code {
+    [Parameter, EditorRequired] public PluginTableSection Section { get; set; } = default!;
+
+    private readonly CancellationTokenSource cts = new();
+
+    private IReadOnlyList<PluginRow> rows = [];
+    private string filter = string.Empty;
+    private PluginResult? result;
+    private bool loading = true;
+    private bool busy;
+
+    /// <summary>The row and action waiting on a Yes, if any.</summary>
+    private (PluginRowAction Action, PluginRow Row)? confirming;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+        confirming = null;
+
+        try
+        {
+            rows = await Section.LoadAsync(cts.Token);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            rows = [];
+            result = PluginResult.Failure(ex.Message);
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private List<PluginRow> Visible =>
+        string.IsNullOrWhiteSpace(filter)
+            ? rows.ToList()
+            : rows.Where(r => r.Cells.Any(c => c?.Contains(filter, StringComparison.OrdinalIgnoreCase) is true)).ToList();
+
+    private static string? CellClass(PluginColumn column) => column.Style switch
+    {
+        PluginCellStyle.Mono => "mono muted",
+        PluginCellStyle.Muted => "muted",
+        _ => null
+    };
+
+    private static string ButtonClass(PluginButtonStyle style) => style switch
+    {
+        PluginButtonStyle.Primary => "btn--primary",
+        PluginButtonStyle.Danger => "btn--danger",
+        PluginButtonStyle.Link => "btn--link",
+        _ => string.Empty
+    };
+
+    private PluginRowAction? Pending(PluginRow row) =>
+        confirming is { } c && ReferenceEquals(c.Row, row) ? c.Action : null;
+
+    private Task Click(PluginRowAction action, PluginRow row)
+    {
+        // A destructive action asks first; the row turns into the question.
+        if (!string.IsNullOrWhiteSpace(action.Confirm))
+        {
+            confirming = (action, row);
+            result = null;
+            return Task.CompletedTask;
+        }
+
+        return RunAsync(action, row);
+    }
+
+    private async Task RunAsync(PluginRowAction action, PluginRow row)
+    {
+        busy = true;
+        confirming = null;
+        result = null;
+
+        try
+        {
+            var outcome = await action.InvokeAsync(row, cts.Token);
+            result = outcome.Message is null ? null : outcome;
+
+            // The handler changed something, so whatever is on screen is now stale.
+            if (outcome.Ok)
+                await LoadAsync();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            result = PluginResult.Failure(ex.Message);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    public void Dispose()
+    {
+        cts.Cancel();
+        cts.Dispose();
+    }
+}

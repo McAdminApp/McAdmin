@@ -1,0 +1,95 @@
+@implements IDisposable
+
+@* A few fields and one button — the "add a player" shape. The handler gets every field,
+   edited or not, and the form empties itself once the handler is happy. *@
+
+<AddonMessage Result="result"/>
+
+<AddonSlot Title="@Section.Title" Description="@Section.Description">
+    <ChildContent>
+        <div class="slot-body">
+            <div style="display: flex; gap: 0.6rem; align-items: flex-end; flex-wrap: wrap;">
+                @foreach (var field in Section.Fields)
+                {
+                    <div class="field" style="margin: 0; width: 18rem;">
+                        <label for="@IdFor(field)">@field.Label</label>
+                        <AddonFieldInput Field="field" Id="@IdFor(field)" Value="@ValueOf(field)" Disabled="busy"
+                                         ValueChanged="v => values[field.Key] = v"/>
+                        @if (!string.IsNullOrWhiteSpace(field.Description))
+                        {
+                            <span class="hint">@field.Description</span>
+                        }
+                    </div>
+                }
+
+                <button class="btn btn--small btn--primary" style="margin-bottom: 1.4rem;"
+                        @onclick="SubmitAsync" disabled="@(busy || !Complete)">
+                    @(busy ? "Working…" : Section.SubmitLabel)
+                </button>
+            </div>
+        </div>
+    </ChildContent>
+</AddonSlot>
+
+@code {
+    [Parameter, EditorRequired] public PluginFormSection Section { get; set; } = default!;
+
+    private readonly CancellationTokenSource cts = new();
+
+    /// <summary>What is in the controls right now, keyed by field key.</summary>
+    private readonly Dictionary<string, string> values = [];
+
+    private readonly string prefix = $"addon-{Guid.NewGuid():N}";
+
+    private PluginResult? result;
+    private bool busy;
+
+    protected override void OnInitialized() => Reset();
+
+    private void Reset()
+    {
+        values.Clear();
+
+        foreach (var field in Section.Fields)
+            values[field.Key] = field.Value ?? string.Empty;
+    }
+
+    private string IdFor(PluginField field) => $"{prefix}-{field.Key}";
+
+    private string ValueOf(PluginField field) => values.GetValueOrDefault(field.Key, string.Empty);
+
+    /// <summary>Required fields have to hold something before the button lights up.</summary>
+    private bool Complete => Section.Fields
+        .Where(f => f.Required)
+        .All(f => !string.IsNullOrWhiteSpace(ValueOf(f)));
+
+    private async Task SubmitAsync()
+    {
+        busy = true;
+        result = null;
+
+        try
+        {
+            var outcome = await Section.SubmitAsync(new Dictionary<string, string>(values), cts.Token);
+            result = outcome.Message is null ? null : outcome;
+
+            // A failed submit keeps what was typed so it can be fixed and sent again.
+            if (outcome.Ok && !Section.KeepValues)
+                Reset();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            result = PluginResult.Failure(ex.Message);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    public void Dispose()
+    {
+        cts.Cancel();
+        cts.Dispose();
+    }
+}

@@ -1,0 +1,109 @@
+@* One route for every described page. The slug picks the plugin's page out of the
+   registry, and the host draws the heading and the sections around it — which is what
+   keeps an addon looking like the rest of the app without the plugin author writing
+   any markup. Keep this route in step with PluginPage.RoutePrefix. *@
+
+@page "/addon/{Slug}"
+@attribute [Authorize]
+@rendermode InteractiveServer
+
+@inject PluginRegistry Plugins
+
+<PageTitle>@(addonPage is null ? "Not found" : addonPage.Title) — McServerMgmnt</PageTitle>
+
+@if (addonPage is null)
+{
+    <div class="page-head">
+        <span class="eyebrow">404</span>
+        <h1>No addon page here</h1>
+        <p>Nothing is registered at <span class="mono">@($"/addon/{Slug}")</span>. The plugin that owns it may have failed to load.</p>
+    </div>
+
+    <div class="page-body">
+        <a class="btn" href="/">Back to the console</a>
+    </div>
+}
+else if (addonPage.AdministratorOnly)
+{
+    <AuthorizeView Roles="@UserRoles.Administrator">
+        <Authorized>@Body</Authorized>
+        <NotAuthorized>
+            <AccessDenied/>
+        </NotAuthorized>
+    </AuthorizeView>
+}
+else
+{
+    @Body
+}
+
+@code {
+    [Parameter] public string? Slug { get; set; }
+
+    private PluginPage? addonPage;
+    private IReadOnlyList<PluginSection> sections = [];
+    private string? buildError;
+
+    /// <summary>
+    /// Parameters, not initialisation: navigating from one addon page to another reuses
+    /// this component, and only the slug changes.
+    /// </summary>
+    protected override async Task OnParametersSetAsync()
+    {
+        addonPage = Plugins.FindPage(Slug);
+        sections = [];
+        buildError = null;
+
+        if (addonPage is null)
+            return;
+
+        try
+        {
+            sections = await addonPage.GetSectionsAsync();
+        }
+        catch (Exception ex)
+        {
+            // A plugin that throws while building takes its own page down, nothing else.
+            buildError = ex.Message;
+        }
+    }
+
+    private RenderFragment Body => @<text>
+        <div class="page-head">
+            <span class="eyebrow">@(addonPage!.Eyebrow ?? "Addon")</span>
+            <h1>@addonPage.Title</h1>
+            @if (!string.IsNullOrWhiteSpace(addonPage.Description))
+            {
+                <p>@addonPage.Description</p>
+            }
+        </div>
+
+        <div class="page-body">
+            <div class="stack">
+                @if (buildError is not null)
+                {
+                    <div class="notice notice--error" role="alert">
+                        <span><strong>This page could not be built.</strong> @buildError</span>
+                    </div>
+                }
+                else if (sections.Count == 0)
+                {
+                    <div class="empty">
+                        <h3>This page is empty</h3>
+                        <p class="muted" style="margin: 0;">The plugin registered it without any sections.</p>
+                    </div>
+                }
+
+                @for (var i = 0; i < sections.Count; i++)
+                {
+                    @* Keyed on slug and position so switching pages tears the old
+                       sections down instead of feeding a table's state to a form.
+                       Position, not the section itself: two sections that happen to
+                       hold equal values would otherwise share one key. *@
+                    var key = $"{Slug}:{i}";
+                    <AddonSection @key="key" Section="sections[i]"/>
+                }
+            </div>
+        </div>
+    </text>;
+}
