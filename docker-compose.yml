@@ -26,6 +26,7 @@ services:
       # Serverkatalogen, läsbar, för konsolloggen. RCON returnerar bara svar på kommandon
       # och aldrig serverns egen utskrift, så loggpanelen kommer härifrån.
       - /opt/minecraft:/srv/minecraft:ro
+      - /opt/mcadmin_addons:/app/addons
       # RCON kan stoppa servern men aldrig starta en som ligger nere — då finns ingen
       # lyssnare kvar. Start och omstart går därför via Docker-socketen.
       - /var/run/docker.sock:/var/run/docker.sock
