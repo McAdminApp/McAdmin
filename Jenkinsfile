@@ -24,8 +24,8 @@ pipeline {
         stage('Bygg image') {
             agent { label 'deb-slave01' }
             steps {
-                // The context is the repository root, not src/web — the web project
-                // references the plugin project and both must sit inside the context.
+                // The context is the repository root, not Web/src — the web project
+                // references the API project and both must sit inside the context.
                 sh '''
                     docker build -f Dockerfile \
                         -t ${IMAGE_NAME}:${BUILD_NUMBER} \
@@ -62,8 +62,8 @@ pipeline {
                     // docker-compose.yml stays in the repository root. Compose derives
                     // the project name from the directory the file sits in, and that
                     // name prefixes the mcservermgmnt_data and _keys volumes. Move the
-                    // file down into src/web and the deploy loses both the database and
-                    // the auth keys.
+                    // file down into a subfolder and the deploy loses both the database
+                    // and the auth keys.
                     sh 'docker compose up -d --force-recreate'
                 }
             }

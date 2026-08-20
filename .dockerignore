@@ -7,18 +7,22 @@
 **/*.user
 **/*.DotSettings.user
 
-# Bygg- och driftfiler som inte hör hemma i kontexten.
+# Build and deployment files that do not belong in the context.
 docker-compose*.yml
 Dockerfile
 Jenkinsfile
-DEPLOY.md
-PLUGINS.md
+**/*.md
 artifacts/
 
-# Lokal körningsdata från utvecklingsmaskinen. Ligger i repots rot och skulle
-# annars följa med in i imagen och skriva över det som är mountat i containern.
-*.db
-*.db-shm
-*.db-wal
-whitelist.json
-server.properties
+# Local runtime data from the development machine. It would otherwise be dragged into
+# the context and, where the paths line up, shadow what is mounted in the container.
+**/*.db
+**/*.db-shm
+**/*.db-wal
+**/whitelist.json
+**/server.properties
+
+# Local plugin folders used when running the app straight from the source tree.
+# In the container these are a volume (/app/addons) and a bind mount (/app/plugins).
+Web/src/addons/
+Web/src/plugins/

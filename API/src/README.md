@@ -6,10 +6,10 @@ built against `McAdminPlugins`, and it can do two things:
 * add pages to the navigation menu, and
 * read and write config files in the Minecraft server's own plugins folder.
 
-| Project      | Role |
-|--------------|------|
-| `src/plugin` | `McAdminPlugins` — the contract plugin authors build against. Distributed as a loose `.dll`. |
-| `src/web`    | The web app. `Services/Plugins/` holds the loader and the implementations. |
+| Project   | Role |
+|-----------|------|
+| `API/src` | `McAdminPlugins` — the contract plugin authors build against. Distributed as a loose `.dll`. |
+| `Web/src` | The web app. `Services/Plugins/` holds the loader and the implementations. |
 
 ---
 
@@ -43,7 +43,7 @@ that adds pages needs `Microsoft.NET.Sdk.Razor`:
 
 If it ends up in `bin/` anyway that is harmless — the host skips the copy. With the
 source next to you, pointing straight at the project works just as well during
-development: `<ProjectReference Include="..\..\mcmngmt\src\plugin\McAdminPlugins.csproj" />`.
+development: `<ProjectReference Include="..\..\mcmngmt\API\src\McAdminPlugins.csproj" />`.
 
 Use a `McAdminPlugins.dll` from the same build as the app you are targeting. The
 contract carries no version of its own, so an outdated .dll against a newer app is not
@@ -209,7 +209,7 @@ The two folders are **not** the same thing: `addons` holds McAdmin's own extensi
 
 ## How it works
 
-Everything lives in `src/web/Services/Plugins/`.
+Everything lives in `Web/src/Services/Plugins/`.
 
 **`PluginLoader`** runs from `Program.cs` right after `DbInitializer`, before the first
 request, because routing needs the assembly list in place before endpoints are built.

@@ -4,19 +4,20 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
 # Restore against the bare project files first, so the package download lands in a layer
-# of its own and survives edits to the source.
-COPY src/McAdminPlugins.sln src/
-COPY src/web/McServerMgmnt.csproj src/web/
-COPY src/plugin/McAdminPlugins.csproj src/plugin/
-RUN dotnet restore src/McAdminPlugins.sln
+# of its own and survives edits to the source. There is no solution file; restoring the
+# web project pulls in the API project through its ProjectReference.
+COPY API/src/McAdminPlugins.csproj API/src/
+COPY Web/src/McServerMgmnt.csproj Web/src/
+RUN dotnet restore Web/src/McServerMgmnt.csproj
 
-COPY src/ src/
+COPY API/ API/
+COPY Web/ Web/
 # Note: no --no-restore here. The restore above runs against the bare .csproj files,
 # before any Razor components or wwwroot exist, and a --no-restore publish on top of it
 # drops the framework's static web assets — wwwroot/_framework/blazor.web.js never gets
 # published, so every page renders static and nothing interactive works. The restore
 # layer above still caches the package download.
-RUN dotnet publish src/web/McServerMgmnt.csproj -c Release -o /app/publish
+RUN dotnet publish Web/src/McServerMgmnt.csproj -c Release -o /app/publish
 
 
 # The plugin API is exported as a loose .dll — plugin authors download it and reference
