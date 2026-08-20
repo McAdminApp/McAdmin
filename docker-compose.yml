@@ -14,6 +14,7 @@ services:
       - mcservermgmnt_keys:/home/app/.aspnet/DataProtection-Keys
       # Inställningssidan läser och skriver den här filen.
       - /opt/minecraft/server.properties:/app/server.properties
+      - /opt/minecraft/whitelist.json:/app/whitelist.json
       # Serverkatalogen, läsbar, för konsolloggen. RCON returnerar bara svar på kommandon
       # och aldrig serverns egen utskrift, så loggpanelen kommer härifrån.
       - /opt/minecraft:/srv/minecraft:ro
