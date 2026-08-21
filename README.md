@@ -1,4 +1,4 @@
-# McAdmin
+# McAdmin [![Build Status](https://jenkins.jonteohr.xyz/buildStatus/icon?job=MC_MGMNT)](https://jenkins.jonteohr.xyz/view/Web/job/MC_MGMNT/)
 
 A web console for a Minecraft server. Start and stop it, watch what it is saying, edit
 `server.properties` and the whitelist without opening a text editor, and hand out logins

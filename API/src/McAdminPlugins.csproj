@@ -6,6 +6,10 @@
         <ImplicitUsings>enable</ImplicitUsings>
     </PropertyGroup>
 
+    <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
+      <DocumentationFile>bin\Release\McAdminPlugins.xml</DocumentationFile>
+    </PropertyGroup>
+
 
     <ItemGroup>
         <SupportedPlatform Include="browser"/>
