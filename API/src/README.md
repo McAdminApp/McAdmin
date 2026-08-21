@@ -6,7 +6,8 @@ built against `McAdminPlugins`, and it can do three things:
 * describe pages that the host renders in its own design — no markup involved,
 * bring its own Razor components when a page needs something the description cannot
   express, and
-* read and write config files in the Minecraft server's own plugins folder.
+* read and write config files in the Minecraft server's own plugins folder, through a
+  YAML parser that puts the file back the way it found it, comments and all.
 
 Start with a described page. It is less code, it cannot drift out of step with the app's
 look, and it cannot end up on a route that does not exist.
@@ -105,24 +106,31 @@ pages.AddPage(new PluginPage("essentials", "Essentials")
         {
             Title = "General",
             LoadAsync = async ct =>
-            [
-                new PluginField("motd", "Message of the day")
-                {
-                    Value = await ReadAsync("motd", ct),
-                    Description = "Shown to players as they join."
-                },
-                new PluginField("god-mode", "God mode")
-                {
-                    Kind = PluginFieldKind.Toggle,
-                    Value = await ReadAsync("god-mode", ct),
-                    Group = "Gameplay",
-                    RequiresRestart = true
-                }
-            ],
+            {
+                var config = await files.ReadYamlAsync("EssentialsX/config.yml", ct);
+
+                return
+                [
+                    new PluginField("motd", "Message of the day")
+                    {
+                        Value = config.GetString("motd"),
+                        Description = "Shown to players as they join."
+                    },
+                    new PluginField("god-mode", "God mode")
+                    {
+                        Kind = PluginFieldKind.Toggle,
+                        Value = config.GetBool("god-mode") ? "true" : "false",
+                        Group = "Gameplay",
+                        RequiresRestart = true
+                    }
+                ];
+            },
             SaveAsync = async (changes, ct) =>
             {
-                foreach (var (key, value) in changes)
-                    await WriteAsync(key, value, ct);
+                await files.EditYamlAsync("EssentialsX/config.yml", config =>
+                {
+                    foreach (var (key, value) in changes) config.Set(key, value);
+                }, ct);
 
                 return PluginResult.Success();
             }
@@ -130,6 +138,12 @@ pages.AddPage(new PluginPage("essentials", "Essentials")
     ]
 });
 ```
+
+A field's `Key` is a YAML path, which is what makes that save handler a one-liner: the
+host hands back the keys that changed, and each one is already where the value goes.
+Toggles are the one place to be deliberate — the host's checkbox reads the exact string
+`"true"`, so load them through `GetBool` rather than `GetString`, or a file that says
+`god-mode: yes` draws an unticked box.
 
 That is the whole page. It gets the filter box, the grouped rows, per-row **Undo**, the
 "2 unsaved changes" command bar and the green or red notice afterwards — the same ones
@@ -204,12 +218,9 @@ public sealed class MyPlugin(IPluginNavigation nav, IServerPluginFiles files) : 
 <button class="btn" @onclick="Save">Save</button>
 
 @code {
-    private async Task Save()
-    {
-        var yaml = await MyPlugin.Files!.ReadTextAsync("EssentialsX/config.yml");
-        await MyPlugin.Files.WriteTextAsync("EssentialsX/config.yml",
-            yaml.Replace("enabled: false", "enabled: true"));
-    }
+    private Task Save() =>
+        MyPlugin.Files!.EditYamlAsync("EssentialsX/config.yml",
+            config => config.Set("enabled", true));
 }
 ```
 
@@ -326,10 +337,88 @@ Every path is relative to the plugins folder. Paths that point out of it — `..
 absolute path — are refused with `UnauthorizedAccessException`. Check `IsConnected`
 before doing anything: if the folder is not mounted, the other calls throw.
 
-Text in and text out, deliberately. Config formats differ between Minecraft plugins, so
-parsing YAML or JSON is left to the plugin that knows which format it is dealing with.
-The server also reads most of these files only at startup, so a change usually does not
-take effect until it restarts.
+Text in and text out, because config formats differ between Minecraft plugins. Nearly
+all of them are YAML, though, so that one trip is made for you — see below. The server
+also reads most of these files only at startup, so a change usually does not take effect
+until it restarts.
+
+### YAML
+
+`McAdminPlugins.Yaml` holds a YAML parser built for exactly one job: changing a value in
+a Minecraft plugin's `config.yml` without disturbing the rest of the file. EssentialsX
+ships around a thousand lines of comments explaining its own settings, and a round trip
+through an ordinary YAML library throws every one of them away. Here a save rewrites the
+lines it has to and no others.
+
+```csharp
+using McAdminPlugins.Yaml;
+
+var config = await files.ReadYamlAsync("EssentialsX/config.yml", ct);
+
+config.GetString("motd");                    // "Welcome!"
+config.GetBool("god-mode");                  // reads true, yes and on alike
+config.GetInt("teleport-delay", 3);          // with a fallback
+config.GetStringList("disabled-commands");   // ["nick", "ping"]
+config.GetKeys("kits");                      // ["tools", "dtools"], in file order
+
+config.Set("motd", "Welcome back!");
+config.Set("god-mode", true);
+config.SetList("disabled-commands", ["nick", "ping", "me"]);
+config.Remove("obsolete-setting");
+
+await files.WriteYamlAsync("EssentialsX/config.yml", config, ct);
+```
+
+`EditYamlAsync` is the three of those in one call, and is what a save handler wants:
+
+```csharp
+await files.EditYamlAsync("EssentialsX/config.yml", config =>
+{
+    foreach (var (key, value) in changes) config.Set(key, value);
+}, ct);
+```
+
+Nothing is written if the callback throws, so a handler that gives up halfway leaves the
+file as it found it. `ReadYamlOrEmptyAsync` hands back an empty document rather than
+throwing when the file is not there yet, and `YamlDocument.Create()` starts one from
+nothing.
+
+**Paths** are the dotted form Bukkit's own configuration API uses — `"world-options.world.pvp"` —
+with `[0]` to step into a list. A string converts on its own, so paths go in inline. Keys
+that themselves contain a dot cannot be written that way; build those with
+`YamlPath.Of("permissions", "essentials.fly")`, which takes its segments literally.
+
+**What the file gets back.** Writing tries to change as little as it can:
+
+| The file says | You write | The file ends up |
+|---------------|-----------|------------------|
+| `motd: 'Hi'` | `Set("motd", "Hello")` | `motd: 'Hello'` — the quotes stay |
+| `god-mode: no` | `Set("god-mode", true)` | `god-mode: yes` — the spelling stays |
+| `delay: 10  # ticks` | `Set("delay", 20L)` | `delay: 20  # ticks` — the comment stays |
+| `signs: [sign]` | `SetList("signs", [...])` | stays inline; a `- item` list stays a list |
+| nothing | `Set("a.b.c", "x")` | the blocks are created, indented like the rest of the file |
+
+`Set(path, string)` writes the text as it stands, which is what a settings field wants —
+the user typed it, the file gets it. `SetString` is the careful sibling: it quotes a
+value that would otherwise read back as something else, so `SetString("prefix", "yes")`
+lands as `prefix: 'yes'` rather than a boolean. There are also overloads for `bool`,
+`long` and `double`.
+
+**Reading is forgiving, writing is precise.** `GetBool` accepts `true`, `yes` and `on` in
+any case and quoted or not, because an admin who wrote `'false'` meant the setting off.
+Numbers understand `0x1F`, `0755` and `1_000`, the way SnakeYAML — which is what the
+Minecraft server itself reads these files with — resolves them.
+
+**Reaching past the helpers.** `Find` returns the `YamlNode` at a path — a `YamlScalar`,
+`YamlMapping` or `YamlSequence` — and every node carries the `Line` it came from, which
+is worth putting in an error message. A `YamlException` carries one too.
+
+**What it does not do.** Anchors and aliases (`&x` / `*x`), tags, merge keys, multiple
+documents in one file, and values that run across several lines without quotes or a `|`
+block. None of these appear in the config files a Minecraft server writes; all of them
+are refused with a message naming the line rather than parsed into something wrong.
+Adding a key to a non-empty inline mapping (`{a: 1}`) is refused for the same reason —
+write the whole value instead.
 
 ---
 

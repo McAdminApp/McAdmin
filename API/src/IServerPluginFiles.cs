@@ -6,7 +6,9 @@ namespace McAdminPlugins;
 /// that folder, and paths that try to climb out of it with ".." are rejected.
 ///
 /// This is deliberately plain text in and out: config formats differ per Minecraft
-/// plugin, so parsing YAML, JSON or .properties is left to whoever knows the format.
+/// plugin, so parsing is left to whoever knows the format. Nearly all of them are YAML,
+/// though, and <see cref="ServerPluginFilesYaml"/> makes that trip in one call — through
+/// a parser that leaves the file's comments and layout alone.
 /// </summary>
 public interface IServerPluginFiles
 {
